@@ -2,7 +2,7 @@
    cache only when offline. (v1 was cache-first and could pin a stale build.) */
 const CACHE = 'stationery-v2';
 const SHELL = [
-  './', './index.html', './styles.css', './config.js', './compute.js',
+  './', './index.html', './styles.css', './config.js', './compute.js', './parse.js',
   './demo-data.js', './api.js', './app.js', './manifest.webmanifest',
   './assets/icon-192.png', './assets/icon-512.png'
 ];

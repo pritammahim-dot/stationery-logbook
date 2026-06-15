@@ -133,6 +133,18 @@ const API = (function () {
       const txn = { txn_id: 'IN-' + p.date.replace(/-/g, '') + '-' + uuid().slice(0, 4), date: p.date, item_id: p.item_id, qty: Number(p.qty), remarks: p.remarks || '', month: p.date.slice(0, 7), status: 'active', created_at: nowIso(), created_by: 'demo' };
       s.stockIn.push(txn); return ok({ txn, entity: 'stockIn' });
     }
+    if (action === 'bulkStockIn') {
+      if (!Array.isArray(p.rows) || !p.rows.length) return err('validation', { field: 'rows' });
+      const created = [];
+      p.rows.forEach((row) => {
+        const qty = Number(row.qty); if (!(qty > 0) || !row.item_id) return;
+        const date = row.date || p.date;
+        const txn = { txn_id: 'IN-' + String(date).replace(/-/g, '') + '-' + uuid().slice(0, 4), date, item_id: row.item_id, qty, remarks: row.remarks || '', month: String(date).slice(0, 7), status: 'active', created_at: nowIso(), created_by: 'demo' };
+        s.stockIn.push(txn); created.push(txn);
+      });
+      if (!created.length) return err('validation', { msg: 'no valid rows' });
+      return ok({ created, count: created.length, entity: 'stockIn' });
+    }
     if (action === 'stockOut') {
       const m = need(['date', 'user_id', 'item_id', 'qty']); if (m) return err('validation', { field: m });
       if (!(Number(p.qty) > 0)) return err('validation', { field: 'qty' });
@@ -162,6 +174,7 @@ const API = (function () {
     addUser: (p) => call('addUser', p),
     updateUser: (p) => call('updateUser', p),
     stockIn: (p) => call('stockIn', p),
+    bulkStockIn: (p) => call('bulkStockIn', p),
     stockOut: (p) => call('stockOut', p),
     voidEntry: (p) => call('voidEntry', p),
     addSection: (p) => call('addSection', p),

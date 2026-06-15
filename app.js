@@ -164,6 +164,7 @@ async function doWrite(promise, okMsg) {
 
 /* ============================ modal & toast ============================ */
 function modal(title, bodyHtml, buttons) {
+  const _m = document.querySelector('#modalOverlay .modal'); if (_m) _m.style.maxWidth = '';   // reset width (import review widens it)
   $('modalTitle').textContent = title;
   $('modalBody').innerHTML = bodyHtml;
   const foot = $('modalFoot'); foot.innerHTML = '';
@@ -255,7 +256,9 @@ function userOptions(selectedId) {
 function renderStockIn() {
   const recent = STATE.stockIn.slice().reverse().slice(0, 25);
   $('view-stockin').innerHTML = `
-    <div class="card"><div class="card-head"><h2>${L('স্টক গ্রহণ (ইন)', 'Stock In')}</h2><span class="sub">${L('নতুন মালামাল গুদামে যোগ করুন', 'add received supplies')}</span></div>
+    <div class="card"><div class="card-head"><h2>${L('স্টক গ্রহণ (ইন)', 'Stock In')}</h2><span class="sub">${L('নতুন মালামাল গুদামে যোগ করুন', 'add received supplies')}</span><span class="spacer"></span>
+      <button class="btn btn-sm" onclick="downloadImportTemplate()">⬇ ${L('টেমপ্লেট', 'Template')}</button>
+      <button class="btn btn-sm" onclick="openImport()">📄 ${L('ফাইল থেকে আমদানি', 'Import file')}</button></div>
       <div class="form-grid two">
         <div class="field"><label>${L('তারিখ', 'Date')}</label><input type="date" id="siDate" value="${todayISO()}"></div>
         <div class="field"><label>${L('আইটেম', 'Item')}</label><select id="siItem">${itemOptions()}</select></div>
@@ -823,4 +826,103 @@ async function saveCycle(id) {
   if (id) { p.cycle_id = id; if ($('cyStatus')) p.status = $('cyStatus').value; res = await doWrite(API.updateCycle(p), L('চক্র হালনাগাদ হয়েছে', 'Cycle updated')); }
   else res = await doWrite(API.addCycle(p), L('চক্র তৈরি হয়েছে', 'Cycle created'));
   if (res) { if (res.data && res.data.cycle) STATE.ui.req.cycleId = res.data.cycle.cycle_id; closeModal(); switchView('requirements'); renderRequirements(); }
+}
+
+/* ============================ IMPORT (file → bulk Stock In) ============================ */
+let _imp = null;   // last parsed/resolved import
+
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.async = true; s.onload = () => res(); s.onerror = () => rej(new Error('load failed: ' + src)); document.head.appendChild(s); }); }
+async function ensureXlsx() { if (!window.XLSX) await loadScript('https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'); }
+async function ensurePdfjs() { if (!window.pdfjsLib) { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'); if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; } }
+
+// reconstruct text lines from PDF.js text items by their y-position
+function pdfItemsToLines(items) {
+  const byY = {};
+  items.forEach((it) => { const y = Math.round(it.transform[5]); (byY[y] = byY[y] || []).push(it); });
+  return Object.keys(byY).map(Number).sort((a, b) => b - a)
+    .map((y) => byY[y].sort((a, b) => a.transform[4] - b.transform[4]).map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean).join('\n');
+}
+
+async function fileToGrid(file) {
+  const name = (file.name || '').toLowerCase();
+  const buf = await file.arrayBuffer();
+  if (name.endsWith('.pdf')) {
+    await ensurePdfjs();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let text = '';
+    for (let p = 1; p <= pdf.numPages; p++) { const page = await pdf.getPage(p); const tc = await page.getTextContent(); text += pdfItemsToLines(tc.items) + '\n'; }
+    return Parse.parsePdfText(text);
+  }
+  await ensureXlsx();
+  const wb = XLSX.read(buf, { type: 'array' });
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false, defval: '' });
+}
+
+window.downloadImportTemplate = function () {
+  const lines = STATE.items.filter(isActive).sort((a, b) => itemName(a).localeCompare(itemName(b))).map((i) => [i.item_id, i.name_en || i.name_bn, i.unit, '', '']);
+  downloadCSV('stock_in_template.csv', ['item_id', 'item', 'unit', 'quantity', 'remarks'], lines);
+};
+
+window.openImport = function () {
+  modal(L('ফাইল থেকে আমদানি', 'Import from file'),
+    `<div class="field"><label>${L('Excel/CSV বা PDF ফাইল', 'Excel/CSV or PDF file')}</label>
+       <input type="file" id="impFile" accept=".xlsx,.xls,.csv,.pdf"></div>
+     <p class="hint">${L('আইটেমের নাম ও পরিমাণ আছে এমন ফাইল দিন। আমাদের টেমপ্লেট ব্যবহার করলে মিল নিখুঁত হয়। PDF অবশ্যই লেখা-নির্বাচনযোগ্য হতে হবে (স্ক্যান নয়)।', 'Upload a file with item names and quantities. Our template gives exact matches. PDFs must have selectable text (not scans).')}</p>
+     <div id="impStatus" class="hint"></div>`,
+    [{ label: L('বাতিল', 'Cancel'), onClick: closeModal }]);
+  setTimeout(() => { const f = $('impFile'); if (f) f.addEventListener('change', onImportFile); }, 20);
+};
+
+async function onImportFile(e) {
+  const file = e.target.files && e.target.files[0]; if (!file) return;
+  const st = $('impStatus'); if (st) { st.textContent = L('পড়া হচ্ছে…', 'Reading…'); st.className = 'hint'; }
+  try {
+    const grid = await fileToGrid(file);
+    const resolved = Parse.resolveRows(grid, STATE.items);
+    if (!resolved.rows.length) { if (st) { st.textContent = L('কোনো সারি পাওয়া যায়নি — কলাম/ফরম্যাট দেখুন বা টেমপ্লেট ব্যবহার করুন।', 'No rows found — check the columns/format or use the template.'); st.className = 'hint bad'; } return; }
+    _imp = resolved;
+    renderImportReview();
+  } catch (err) { if (st) { st.textContent = L('ফাইল পড়া যায়নি: ', 'Could not read file: ') + (err.message || err); st.className = 'hint bad'; } }
+}
+
+function renderImportReview() {
+  const rows = _imp.rows;
+  const matched = rows.filter((r) => r.status !== 'unmatched').length;
+  const opts = (sel) => `<option value="">${L('— বাছুন —', '— pick —')}</option>` + STATE.items.filter(isActive).slice().sort((a, b) => itemName(a).localeCompare(itemName(b))).map((i) => `<option value="${i.item_id}" ${i.item_id === sel ? 'selected' : ''}>${esc(itemName(i))}</option>`).join('');
+  const body = `
+    <div class="form-grid two">
+      <div class="field"><label>${L('গ্রহণের তারিখ', 'Date')}</label><input type="date" id="impDate" value="${todayISO()}"></div>
+      <div class="field"><label>${L('মন্তব্য (সব সারিতে)', 'Remarks (all rows)')}</label><input type="text" id="impRemarks" placeholder="${L('ঐচ্ছিক', 'optional')}"></div>
+    </div>
+    <p class="hint">${nf(rows.length)} ${L('সারি', 'rows')} · ${nf(matched)} ${L('মিলেছে', 'matched')} · ${L('বাকিগুলো বাছুন বা টিক তুলে বাদ দিন', 'pick or untick the rest')}</p>
+    <div class="table-wrap" style="max-height:46vh;overflow:auto"><table><thead><tr><th></th><th>${L('ফাইলের নাম', 'From file')}</th><th>${L('আইটেম', 'Item')}</th><th class="num">${L('পরিমাণ', 'Qty')}</th><th>${L('অবস্থা', 'Status')}</th></tr></thead><tbody>
+      ${rows.map((r, i) => `<tr>
+        <td><input type="checkbox" class="imp-skip" data-i="${i}" ${(r.status === 'unmatched' && !r.item_id) ? '' : 'checked'}></td>
+        <td>${esc(r.rawName || r.rawId)}</td>
+        <td><select class="imp-item" data-i="${i}">${opts(r.item_id)}</select></td>
+        <td><input type="number" class="imp-qty" data-i="${i}" min="0" step="1" value="${r.qty || ''}" style="width:84px"></td>
+        <td>${r.status === 'matched' ? `<span class="badge badge-ok">${L('মিল', 'match')}</span>` : r.status === 'fuzzy' ? `<span class="badge badge-low">${L('সম্ভাব্য', 'guess')}</span>` : `<span class="badge badge-neg">${L('মিল নেই', 'no match')}</span>`}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`;
+  modal(L('আমদানি পর্যালোচনা', 'Review import'), body,
+    [{ label: L('আমদানি করুন', 'Import'), primary: true, onClick: confirmImport }, { label: L('বাতিল', 'Cancel'), onClick: closeModal }]);
+  const m = document.querySelector('#modalOverlay .modal'); if (m) m.style.maxWidth = '780px';
+  // picking an item for a row auto-includes it
+  setTimeout(() => { document.querySelectorAll('.imp-item').forEach((s) => s.addEventListener('change', () => { const cb = document.querySelector('.imp-skip[data-i="' + s.dataset.i + '"]'); if (cb && s.value) cb.checked = true; })); }, 20);
+}
+
+async function confirmImport() {
+  const date = $('impDate').value || todayISO(), remarks = $('impRemarks').value.trim();
+  const skip = {}, item = {}, qty = {};
+  document.querySelectorAll('.imp-skip').forEach((c) => { skip[c.dataset.i] = !c.checked; });
+  document.querySelectorAll('.imp-item').forEach((s) => { item[s.dataset.i] = s.value; });
+  document.querySelectorAll('.imp-qty').forEach((q) => { qty[q.dataset.i] = enNum(q.value); });
+  const rows = [];
+  _imp.rows.forEach((r, i) => { if (skip[i]) return; const id = item[i] || r.item_id; if (id && qty[i] > 0) rows.push({ item_id: id, qty: qty[i], remarks }); });
+  if (!rows.length) return toast(L('আমদানির জন্য সঠিক সারি নেই', 'No valid rows to import'), 'err');
+  requireWrite(async () => {
+    const res = await doWrite(API.bulkStockIn({ date, rows }), '');
+    if (res) { closeModal(); toast(L(nf(res.data.count) + ' টি এন্ট্রি যোগ হয়েছে', 'Imported ' + res.data.count + ' receipts'), 'ok'); switchView('stockin'); renderStockIn(); }
+  });
 }

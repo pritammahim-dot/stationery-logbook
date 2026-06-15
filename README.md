@@ -93,7 +93,7 @@ allowlist in `Code.gs`.
 | Screen | What it does |
 |---|---|
 | **ড্যাশবোর্ড / Dashboard** | KPIs, low-stock list, 12-month in/out trend, top consumers |
-| **স্টক ইন / Stock In** | record receipts (date, item, qty, remarks) |
+| **স্টক ইন / Stock In** | record receipts (date, item, qty, remarks); **📄 Import from file** — upload an Excel/CSV or digital PDF, auto-match item names (exact when the file has `item_id`, else fuzzy), **review & correct**, then bulk-save. **⬇ Template** downloads a ready-to-fill CSV of your items. |
 | **স্টক আউট / Stock Out** | issue to a user — auto-fills their section, shows live balance, **blocks over-issue**, then offers a printable **issue slip** |
 | **স্টক / Balances** | live In / Out / Balance per item; search, category filter, low-stock filter; CSV + print |
 | **আইটেম / Items** | add items, **rename safely**, set unit/category/reorder level/opening balance, activate/deactivate; **⚙ Units** button to add/edit measurement units |

@@ -89,6 +89,7 @@ function doPost(e) {
       case 'updateCycle':    out = updateCycle(req.payload, req); break;
       case 'setRequirement': out = setRequirement(req.payload, req); break;
       case 'stockIn':    out = stockIn(req.payload, req); break;
+      case 'bulkStockIn': out = bulkStockIn(req.payload, req); break;
       case 'stockOut':   out = stockOut(req.payload, req); break;
       case 'voidEntry':  out = voidEntry(req.payload, req); break;
       case 'setMeta':    out = setMetaAction(req.payload, req); break;
@@ -262,6 +263,22 @@ function stockIn(p, req) {
   };
   appendObj(TABS.stockIn, obj);
   return { ok: true, code: 'ok', data: { txn: obj, entity: 'stockIn' } };
+}
+
+// append many stock-in rows in one locked call (used by file import)
+function bulkStockIn(p, req) {
+  if (!p || !Array.isArray(p.rows) || !p.rows.length) return { ok: false, code: 'validation', data: { field: 'rows', msg: 'no rows' } };
+  var date0 = str(p.date), created = [];
+  for (var i = 0; i < p.rows.length; i++) {
+    var row = p.rows[i] || {}, qty = Number(row.qty);
+    if (!(qty > 0) || !row.item_id) continue;
+    if (!findRow(TABS.items, 'item_id', row.item_id)) continue;
+    var date = str(row.date || date0);
+    var obj = { txn_id: 'IN-' + ymd(date) + '-' + hex4(), date: date, item_id: str(row.item_id), qty: qty, remarks: str(row.remarks), month: date.slice(0, 7), status: 'active', created_at: nowIso(), created_by: actor(req), void_reason: '', voided_at: '', voided_by: '' };
+    appendObj(TABS.stockIn, obj); created.push(obj);
+  }
+  if (!created.length) return { ok: false, code: 'validation', data: { msg: 'no valid rows' } };
+  return { ok: true, code: 'ok', data: { created: created, count: created.length, entity: 'stockIn' } };
 }
 
 function stockOut(p, req) {
