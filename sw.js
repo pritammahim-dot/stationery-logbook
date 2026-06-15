@@ -1,5 +1,6 @@
-/* sw.js — caches the app shell for offline READ. Never caches API writes. */
-const CACHE = 'stationery-v1';
+/* sw.js — network-first: always serve the latest when online, fall back to
+   cache only when offline. (v1 was cache-first and could pin a stale build.) */
+const CACHE = 'stationery-v2';
 const SHELL = [
   './', './index.html', './styles.css', './config.js', './compute.js',
   './demo-data.js', './api.js', './app.js', './manifest.webmanifest',
@@ -18,13 +19,12 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;                       // writes always hit network
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;                   // fonts + Apps Script API → network
+  // network-first: prefer fresh, cache it, fall back to cache (then index.html) when offline
   e.respondWith(
-    caches.match(e.request).then((cached) =>
-      cached || fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
-        return res;
-      }).catch(() => cached)
-    )
+    fetch(e.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(e.request, copy));
+      return res;
+    }).catch(() => caches.match(e.request).then((hit) => hit || (e.request.mode === 'navigation' ? caches.match('./index.html') : undefined)))
   );
 });
