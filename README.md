@@ -93,9 +93,11 @@ allowlist in `Code.gs`.
 | **স্টক ইন / Stock In** | record receipts (date, item, qty, remarks) |
 | **স্টক আউট / Stock Out** | issue to a user — auto-fills their section, shows live balance, **blocks over-issue**, then offers a printable **issue slip** |
 | **স্টক / Balances** | live In / Out / Balance per item; search, category filter, low-stock filter; CSV + print |
-| **আইটেম / Items** | add items, **rename safely**, set unit/category/reorder level/opening balance, activate/deactivate |
-| **কর্মী / Users** | add/edit staff and their section |
-| **রিপোর্ট / Reports** | Monthly In, Monthly Out, User-wise — print / Save-as-PDF / CSV export |
+| **আইটেম / Items** | add items, **rename safely**, set unit/category/reorder level/opening balance, activate/deactivate; **⚙ Units** button to add/edit measurement units |
+| **কর্মী / Users** | add/edit staff and their section; **⚙ Sections** button to add/edit/rename sections |
+| **রিপোর্ট / Reports** | Monthly In, Monthly Out, User-wise, and **Detailed (line-item)** — filter by **date range**, **single section**, and **single user**; print / Save-as-PDF / CSV export (respects filters) |
+
+Dropdowns are not fixed: **units** and **sections** are managed in-app (⚙ buttons on the Items / Users tabs), and **category** is a free-text field with suggestions — type a new one anytime.
 
 Other niceties: bilingual UI with Bengali numerals, installable PWA with offline
 **read**, audit trail (`AuditLog` tab), undo via **void** (never deletes),

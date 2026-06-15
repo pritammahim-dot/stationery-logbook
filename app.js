@@ -16,16 +16,19 @@ const STATE = {
   d: {}, lang: localStorage.getItem('sl_lang') || CFG.DEFAULT_LANG || 'bn', view: 'dashboard',
   itemById: new Map(), userById: new Map(), sectionById: new Map(),
   // per-view UI state
-  ui: { stockFilter: { q: '', cat: '', low: false }, itemFilter: { q: '', cat: '', inactive: false }, userFilter: { q: '', sec: '', inactive: false }, report: 'in', repSec: '' }
+  ui: { stockFilter: { q: '', cat: '', low: false }, itemFilter: { q: '', cat: '', inactive: false }, userFilter: { q: '', sec: '', inactive: false }, rep: { type: 'out', from: '', to: '', sec: '', user: '' } }
 };
 
 const L = (bn, en) => (STATE.lang === 'bn' ? bn : en);
 const nf = (n) => (STATE.lang === 'bn' ? toBn(n) : String(n));
 const lowDefault = () => Number(STATE.meta.low_stock_default || CFG.LOW_STOCK_DEFAULT || 5);
 
-const UNIT_BN = { piece: 'পিস', ream: 'রিম', box: 'বক্স' };
-const UNIT_EN = { piece: 'Piece', ream: 'Ream', box: 'Box' };
-const unitLabel = (u) => (STATE.lang === 'bn' ? (UNIT_BN[u] || u) : (UNIT_EN[u] || u));
+const DEFAULT_UNITS = [{ code: 'piece', bn: 'পিস', en: 'Piece' }, { code: 'ream', bn: 'রিম', en: 'Ream' }, { code: 'box', bn: 'বক্স', en: 'Box' }];
+function getUnits() { try { const u = STATE.meta.units; if (u) { const a = typeof u === 'string' ? JSON.parse(u) : u; if (Array.isArray(a) && a.length) return a; } } catch (e) {} return DEFAULT_UNITS; }
+const unitMap = () => { const m = {}; getUnits().forEach((u) => { m[u.code] = u; }); return m; };
+const unitLabel = (code) => { const u = unitMap()[code]; return u ? (STATE.lang === 'bn' ? (u.bn || u.en || code) : (u.en || u.bn || code)) : code; };
+const unitOptions = (sel) => getUnits().map((u) => `<option value="${esc(u.code)}" ${u.code === sel ? 'selected' : ''}>${esc(STATE.lang === 'bn' ? (u.bn || u.en) : (u.en || u.bn))}</option>`).join('');
+const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
 
 const itemOf = (id) => STATE.itemById.get(id);
 const userOf = (id) => STATE.userById.get(id);
@@ -375,6 +378,7 @@ function renderItems() {
   rows.sort((a, b) => itemName(a).localeCompare(itemName(b)));
   $('view-items').innerHTML = `
     <div class="card"><div class="card-head"><h2>${L('আইটেম তালিকা', 'Items')}</h2><span class="sub">${L(nf(rows.length) + ' টি', rows.length + '')}</span><span class="spacer"></span>
+      <button class="btn btn-sm" onclick="openManageUnits()">⚙ ${L('একক', 'Units')}</button>
       <button class="btn btn-primary btn-sm" onclick="openItemModal()">+ ${L('নতুন আইটেম', 'New item')}</button></div>
       <div class="toolbar no-print">
         <input class="grow" type="search" placeholder="${L('খুঁজুন…', 'Search…')}" value="${esc(f.q)}" oninput="STATE.ui.itemFilter.q=this.value;renderItems()">
@@ -393,7 +397,7 @@ window.openItemModal = function (itemId) {
         <div class="field"><label>${L('নাম (বাংলা/মূল)', 'Name (primary)')}</label><input type="text" id="itName" value="${esc(it ? it.name_bn : '')}"></div>
         <div class="field"><label>${L('নাম (ইংরেজি)', 'Name (English)')}</label><input type="text" id="itNameEn" value="${esc(it ? it.name_en : '')}"></div>
         <div class="form-grid two" style="gap:14px">
-          <div class="field"><label>${L('একক', 'Unit')}</label><select id="itUnit">${['piece', 'ream', 'box'].map((u) => `<option value="${u}" ${it && it.unit === u ? 'selected' : ''}>${unitLabel(u)}</option>`).join('')}</select></div>
+          <div class="field"><label>${L('একক', 'Unit')}</label><select id="itUnit">${unitOptions(it ? it.unit : '')}</select></div>
           <div class="field"><label>${L('ক্যাটাগরি', 'Category')}</label><input type="text" id="itCat" list="catList" value="${esc(it ? it.category : '')}"><datalist id="catList">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div>
           <div class="field"><label>${L('রি-অর্ডার লেভেল', 'Reorder level')}</label><input type="number" id="itReorder" min="0" value="${it && it.reorder_level !== '' && it.reorder_level != null ? esc(it.reorder_level) : ''}" placeholder="${nf(lowDefault())}"></div>
           <div class="field"><label>${L('ওপেনিং ব্যালেন্স', 'Opening balance')}</label><input type="number" id="itOpening" min="0" value="${esc(it ? (it.opening_balance || 0) : 0)}" ${it ? '' : ''}></div>
@@ -423,6 +427,7 @@ function renderUsers() {
   rows.sort((a, b) => (a.section_id || '').localeCompare(b.section_id || '') || userName(a).localeCompare(userName(b)));
   $('view-users').innerHTML = `
     <div class="card"><div class="card-head"><h2>${L('কর্মী তালিকা', 'Users')}</h2><span class="sub">${L(nf(rows.length) + ' জন', rows.length + '')}</span><span class="spacer"></span>
+      <button class="btn btn-sm" onclick="openManageSections()">⚙ ${L('সেকশন', 'Sections')}</button>
       <button class="btn btn-primary btn-sm" onclick="openUserModal()">+ ${L('নতুন কর্মী', 'New user')}</button></div>
       <div class="toolbar no-print">
         <input class="grow" type="search" placeholder="${L('খুঁজুন…', 'Search…')}" value="${esc(f.q)}" oninput="STATE.ui.userFilter.q=this.value;renderUsers()">
@@ -440,7 +445,7 @@ window.openUserModal = function (userId) {
       `<div class="form-grid">
         <div class="field"><label>${L('নাম', 'Name')}</label><input type="text" id="usName" value="${esc(u ? u.name_bn : '')}"></div>
         <div class="field"><label>${L('পদবি', 'Designation')}</label><input type="text" id="usDesig" value="${esc(u ? u.designation : '')}" placeholder="${L('ঐচ্ছিক', 'optional')}"></div>
-        <div class="field"><label>${L('সেকশন', 'Section')}</label><select id="usSec">${STATE.sections.map((s) => `<option value="${s.section_id}" ${u && u.section_id === s.section_id ? 'selected' : ''}>${esc(sectionName(s))}</option>`).join('')}</select></div>
+        <div class="field"><label>${L('সেকশন', 'Section')}</label><select id="usSec">${sectionOptions(u ? u.section_id : '')}</select></div>
         ${u ? `<label class="check"><input type="checkbox" id="usActive" ${isActive(u) ? 'checked' : ''}> ${L('সক্রিয়', 'Active')}</label>` : ''}
       </div>`,
       [{ label: L('সংরক্ষণ', 'Save'), primary: true, onClick: () => saveUser(userId) }, { label: L('বাতিল', 'Cancel'), onClick: closeModal }]);
@@ -487,22 +492,50 @@ window.showSlip = function (txnId) {
 };
 
 /* ============================ REPORTS ============================ */
+function filteredIn() { const r = STATE.ui.rep; return STATE.stockIn.filter((x) => !isVoid(x) && (!r.from || x.date >= r.from) && (!r.to || x.date <= r.to)); }
+function filteredOut() { const r = STATE.ui.rep; return STATE.stockOut.filter((x) => !isVoid(x) && (!r.from || x.date >= r.from) && (!r.to || x.date <= r.to) && (!r.sec || x.section_id === r.sec) && (!r.user || x.user_id === r.user)); }
+function repSummary() {
+  const r = STATE.ui.rep, parts = [];
+  if (r.from || r.to) parts.push((r.from ? dDate(r.from) : '…') + ' – ' + (r.to ? dDate(r.to) : '…'));
+  if (r.sec && r.type !== 'in') parts.push(sectionNameById(r.sec));
+  if (r.user && r.type !== 'in') parts.push(userNameById(r.user));
+  return parts.length ? parts.join(' · ') : L('সব তথ্য', 'all data');
+}
+window.setRep = function (k, v) {
+  STATE.ui.rep[k] = v;
+  if (k === 'sec') { const u = userOf(STATE.ui.rep.user); if (u && v && u.section_id !== v) STATE.ui.rep.user = ''; }
+  renderReports();
+};
+window.resetRep = function () { STATE.ui.rep = { type: STATE.ui.rep.type, from: '', to: '', sec: '', user: '' }; renderReports(); };
+
 function renderReports() {
-  const r = STATE.ui.report;
-  const tabBtn = (key, bn, en) => `<button class="btn btn-sm ${r === key ? 'btn-primary' : ''}" onclick="STATE.ui.report='${key}';renderReports()">${L(bn, en)}</button>`;
+  const r = STATE.ui.rep;
+  const typeBtn = (k, bn, en) => `<button class="btn btn-sm ${r.type === k ? 'btn-primary' : ''}" onclick="setRep('type','${k}')">${L(bn, en)}</button>`;
+  const inDisabled = r.type === 'in';   // user/section don't apply to stock-in
+  const secOpts = STATE.sections.map((s) => `<option value="${s.section_id}" ${r.sec === s.section_id ? 'selected' : ''}>${esc(sectionName(s))}</option>`).join('');
+  const usrOpts = STATE.users.filter((u) => !r.sec || u.section_id === r.sec).sort((a, b) => userName(a).localeCompare(userName(b))).map((u) => `<option value="${u.user_id}" ${r.user === u.user_id ? 'selected' : ''}>${esc(userName(u))}</option>`).join('');
   let body = '';
-  if (r === 'in') body = pivotReport(STATE.d.monthlyIn, L('মাসিক গ্রহণ', 'Monthly Received'), 'in');
-  else if (r === 'out') body = pivotReport(STATE.d.monthlyOut, L('মাসিক বিতরণ', 'Monthly Issued'), 'out');
-  else body = userWiseReport();
+  if (r.type === 'in') body = pivotReport(Compute.monthlyPivot(filteredIn()), L('মাসিক গ্রহণ', 'Monthly Received'), 'in');
+  else if (r.type === 'out') body = pivotReport(Compute.monthlyPivot(filteredOut()), L('মাসিক বিতরণ', 'Monthly Issued'), 'out');
+  else if (r.type === 'user') body = userWiseReport();
+  else body = detailedReport();
   $('view-reports').innerHTML = `
-    <div class="card"><div class="card-head"><h2>${L('রিপোর্ট', 'Reports')}</h2><span class="spacer"></span><button class="btn btn-sm" onclick="window.print()">🖨 ${L('প্রিন্ট', 'Print')}</button></div>
-      <div class="btn-row no-print" style="margin-bottom:6px">${tabBtn('in', 'মাসিক গ্রহণ', 'Monthly In')}${tabBtn('out', 'মাসিক বিতরণ', 'Monthly Out')}${tabBtn('user', 'কর্মী-ভিত্তিক', 'User-wise')}</div>
+    <div class="card"><div class="card-head"><h2>${L('রিপোর্ট', 'Reports')}</h2><span class="sub">${esc(repSummary())}</span><span class="spacer"></span><button class="btn btn-sm" onclick="window.print()">🖨 ${L('প্রিন্ট', 'Print')}</button></div>
+      <div class="btn-row no-print" style="margin-bottom:10px">${typeBtn('in', 'মাসিক গ্রহণ', 'Monthly In')}${typeBtn('out', 'মাসিক বিতরণ', 'Monthly Out')}${typeBtn('user', 'কর্মী-ভিত্তিক', 'User-wise')}${typeBtn('detail', 'বিস্তারিত', 'Detailed')}</div>
+      <div class="toolbar no-print">
+        <div class="field" style="flex:0 0 auto"><label class="en">${L('শুরুর তারিখ', 'From')}</label><input type="date" value="${r.from}" onchange="setRep('from',this.value)"></div>
+        <div class="field" style="flex:0 0 auto"><label class="en">${L('শেষ তারিখ', 'To')}</label><input type="date" value="${r.to}" onchange="setRep('to',this.value)"></div>
+        <div class="field" style="flex:0 0 auto"><label class="en">${L('সেকশন', 'Section')}</label><select ${inDisabled ? 'disabled' : ''} onchange="setRep('sec',this.value)"><option value="">${L('সব সেকশন', 'All sections')}</option>${secOpts}</select></div>
+        <div class="field" style="flex:0 0 auto"><label class="en">${L('কর্মী', 'User')}</label><select ${inDisabled ? 'disabled' : ''} onchange="setRep('user',this.value)"><option value="">${L('সব কর্মী', 'All users')}</option>${usrOpts}</select></div>
+        <button class="btn btn-sm btn-ghost" onclick="resetRep()">↺ ${L('রিসেট', 'Reset')}</button>
+      </div>
     </div>
     <div class="card">${body}</div>`;
 }
+function emptyReport(title) { return `<div class="card-head"><h2>${title}</h2></div><div class="empty">${L('এই ফিল্টারে কোনো তথ্য নেই', 'No data for this filter')}</div>`; }
 function pivotReport(pivot, title, kind) {
   const months = pivot.months;
-  if (!months.length) return `<div class="card-head"><h2>${title}</h2></div><div class="empty">${L('কোনো তথ্য নেই', 'No data')}</div>`;
+  if (!months.length) return emptyReport(title);
   const itemIds = Object.keys(pivot.items).sort((a, b) => itemNameById(a).localeCompare(itemNameById(b)));
   const head = `<tr><th>${L('আইটেম', 'Item')}</th>${months.map((m) => `<th class="num">${monthLabel(m)}</th>`).join('')}<th class="num">${L('মোট', 'Total')}</th></tr>`;
   const rows = itemIds.map((id) => `<tr><td>${esc(itemNameById(id))}</td>${months.map((m) => `<td class="num">${pivot.items[id].byMonth[m] ? nf(pivot.items[id].byMonth[m]) : '·'}</td>`).join('')}<td class="num"><b>${nf(pivot.items[id].total)}</b></td></tr>`).join('');
@@ -511,20 +544,20 @@ function pivotReport(pivot, title, kind) {
     <div class="table-wrap"><table><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 function userWiseReport() {
-  const uw = STATE.d.userWise;
-  // columns = items that were issued
-  const itemIds = [...new Set(STATE.stockOut.filter((r) => !isVoid(r)).map((r) => r.item_id))].sort((a, b) => itemNameById(a).localeCompare(itemNameById(b)));
-  if (!itemIds.length) return `<div class="card-head"><h2>${L('কর্মী-ভিত্তিক বিতরণ', 'User-wise Issued')}</h2></div><div class="empty">${L('কোনো বিতরণ নেই', 'No issues yet')}</div>`;
-  // group users by section
+  const rows = filteredOut();
+  const uw = Compute.userWiseOut(rows);
+  const itemIds = [...new Set(rows.map((r) => r.item_id))].sort((a, b) => itemNameById(a).localeCompare(itemNameById(b)));
+  if (!itemIds.length) return emptyReport(L('কর্মী-ভিত্তিক বিতরণ', 'User-wise Issued'));
   const bySec = {};
-  STATE.users.forEach((u) => { if (uw[u.user_id]) { (bySec[u.section_id] = bySec[u.section_id] || []).push(u); } });
+  Object.keys(uw).forEach((uid) => { const u = userOf(uid); const sec = u ? (u.section_id || '(unknown)') : '(unknown)'; (bySec[sec] = bySec[sec] || []).push(uid); });
+  const order = STATE.sections.map((s) => s.section_id).concat(Object.keys(bySec).filter((k) => !STATE.sectionById.has(k)));
   const head = `<tr><th>${L('কর্মী / সেকশন', 'User / Section')}</th>${itemIds.map((id) => `<th class="num">${esc(itemNameById(id))}</th>`).join('')}<th class="num">${L('মোট', 'Total')}</th></tr>`;
   let bodyRows = '';
-  STATE.sections.forEach((s) => {
-    const us = bySec[s.section_id]; if (!us || !us.length) return;
-    bodyRows += `<tr style="background:var(--accent)"><td colspan="${itemIds.length + 2}"><b>${esc(sectionName(s))}</b></td></tr>`;
+  order.forEach((secId) => {
+    const uids = bySec[secId]; if (!uids || !uids.length) return;
+    bodyRows += `<tr style="background:var(--accent)"><td colspan="${itemIds.length + 2}"><b>${esc(sectionNameById(secId))}</b></td></tr>`;
     const secTot = {};
-    us.sort((a, b) => userName(a).localeCompare(userName(b))).forEach((u) => {
+    uids.map((id) => userOf(id)).filter(Boolean).sort((a, b) => userName(a).localeCompare(userName(b))).forEach((u) => {
       const g = uw[u.user_id];
       bodyRows += `<tr><td>${esc(userName(u))}</td>${itemIds.map((id) => { const q = g.byItem[id] || 0; secTot[id] = (secTot[id] || 0) + q; return `<td class="num">${q ? nf(q) : '·'}</td>`; }).join('')}<td class="num"><b>${nf(g.total)}</b></td></tr>`;
     });
@@ -533,18 +566,33 @@ function userWiseReport() {
   return `<div class="card-head"><h2>${L('কর্মী-ভিত্তিক বিতরণ', 'User-wise Issued')}</h2><span class="spacer"></span><button class="btn btn-sm no-print" onclick="exportUserWiseCSV()">⬇ CSV</button></div>
     <div class="table-wrap"><table><thead>${head}</thead><tbody>${bodyRows}</tbody></table></div>`;
 }
+function detailedReport() {
+  const rows = filteredOut().slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (!rows.length) return emptyReport(L('বিস্তারিত বিতরণ', 'Detailed issues'));
+  const total = rows.reduce((s, r) => s + Compute.num(r.qty), 0);
+  return `<div class="card-head"><h2>${L('বিস্তারিত বিতরণ', 'Detailed issues')}</h2><span class="sub">${nf(rows.length)} ${L('এন্ট্রি', 'entries')}</span><span class="spacer"></span><button class="btn btn-sm no-print" onclick="exportDetailCSV()">⬇ CSV</button></div>
+    <div class="table-wrap"><table><thead><tr><th>${L('তারিখ', 'Date')}</th><th>${L('স্লিপ', 'Slip')}</th><th>${L('কর্মী', 'User')}</th><th>${L('সেকশন', 'Section')}</th><th>${L('আইটেম', 'Item')}</th><th class="num">${L('পরিমাণ', 'Qty')}</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${dDate(r.date)}</td><td>${esc(r.slip_no || '')}</td><td>${esc(userNameById(r.user_id))}</td><td>${esc(sectionNameById(r.section_id))}</td><td>${esc(itemNameById(r.item_id))}</td><td class="num">${nf(r.qty)} ${unitLabel((itemOf(r.item_id) || {}).unit)}</td></tr>`).join('')}
+    </tbody><tfoot><tr><td colspan="5"><b>${L('মোট', 'Total')}</b></td><td class="num"><b>${nf(total)}</b></td></tr></tfoot></table></div>`;
+}
 window.exportPivotCSV = function (kind) {
-  const pivot = kind === 'in' ? STATE.d.monthlyIn : STATE.d.monthlyOut;
+  const pivot = Compute.monthlyPivot(kind === 'in' ? filteredIn() : filteredOut());
   const head = ['item', ...pivot.months, 'total'];
   const lines = Object.keys(pivot.items).map((id) => [itemNameById(id), ...pivot.months.map((m) => pivot.items[id].byMonth[m] || 0), pivot.items[id].total]);
   downloadCSV('monthly_' + kind + '.csv', head, lines);
 };
 window.exportUserWiseCSV = function () {
-  const uw = STATE.d.userWise;
-  const itemIds = [...new Set(STATE.stockOut.filter((r) => !isVoid(r)).map((r) => r.item_id))];
+  const rows = filteredOut(), uw = Compute.userWiseOut(rows);
+  const itemIds = [...new Set(rows.map((r) => r.item_id))];
   const head = ['user', 'section', ...itemIds.map(itemNameById), 'total'];
-  const lines = STATE.users.filter((u) => uw[u.user_id]).map((u) => [userName(u), sectionNameById(u.section_id), ...itemIds.map((id) => uw[u.user_id].byItem[id] || 0), uw[u.user_id].total]);
+  const lines = Object.keys(uw).map((uid) => { const u = userOf(uid); return [u ? userName(u) : uid, u ? sectionNameById(u.section_id) : '', ...itemIds.map((id) => uw[uid].byItem[id] || 0), uw[uid].total]; });
   downloadCSV('user_wise.csv', head, lines);
+};
+window.exportDetailCSV = function () {
+  const rows = filteredOut().slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const head = ['date', 'slip', 'user', 'section', 'item', 'qty', 'unit'];
+  const lines = rows.map((r) => [r.date, r.slip_no || '', userNameById(r.user_id), sectionNameById(r.section_id), itemNameById(r.item_id), r.qty, (itemOf(r.item_id) || {}).unit || '']);
+  downloadCSV('detailed_issues.csv', head, lines);
 };
 
 /* ============================ CSV download ============================ */
@@ -555,4 +603,67 @@ function downloadCSV(filename, header, rows) {
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = filename; a.click(); URL.revokeObjectURL(a.href);
   toast(L('ফাইল ডাউনলোড হয়েছে', 'File downloaded'), 'ok');
+}
+
+/* ============================ MANAGE LISTS (units / sections) ============================ */
+function sectionOptions(selectedId) {
+  return STATE.sections.filter((s) => isActive(s) || s.section_id === selectedId)
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
+    .map((s) => `<option value="${s.section_id}" ${s.section_id === selectedId ? 'selected' : ''}>${esc(sectionName(s))}</option>`).join('');
+}
+
+/* ---- units (stored as a JSON list in Meta.units; codes are stable) ---- */
+window.openManageUnits = function () {
+  requireWrite(() => {
+    const rowHtml = (u) => `<div class="form-grid two urow" style="gap:8px;margin-bottom:8px">
+        <input type="text" class="u-bn" data-code="${esc(u ? u.code : '')}" value="${esc(u ? u.bn : '')}" placeholder="${L('বাংলা নাম', 'Bengali')}">
+        <input type="text" class="u-en" value="${esc(u ? u.en : '')}" placeholder="${L('ইংরেজি নাম', 'English')}"></div>`;
+    modal(L('একক ব্যবস্থাপনা', 'Manage units'),
+      `<p class="hint">${L('একক যোগ বা সম্পাদনা করুন। খালি ঘর বাদ যাবে; বিদ্যমান এককের কোড অপরিবর্তিত থাকে।', 'Add or edit units. Blank rows are skipped; existing codes stay fixed.')}</p>
+       <div id="unitRows">${getUnits().map(rowHtml).join('')}${rowHtml(null)}</div>
+       <button class="btn btn-sm" id="addUnitRow">+ ${L('আরেকটি', 'Add row')}</button>`,
+      [{ label: L('সংরক্ষণ', 'Save'), primary: true, onClick: saveUnits }, { label: L('বাতিল', 'Cancel'), onClick: closeModal }]);
+    setTimeout(() => { const b = $('addUnitRow'); if (b) b.addEventListener('click', () => { $('unitRows').insertAdjacentHTML('beforeend', rowHtml(null)); }); }, 20);
+  });
+};
+async function saveUnits() {
+  const used = {}, list = [];
+  document.querySelectorAll('#unitRows .urow').forEach((r) => {
+    const bn = r.querySelector('.u-bn').value.trim(), en = r.querySelector('.u-en').value.trim();
+    if (!bn && !en) return;
+    let code = r.querySelector('.u-bn').dataset.code || slug(en || bn) || 'unit';
+    const base = code; let k = 1; while (used[code]) code = base + '-' + (++k); used[code] = 1;
+    list.push({ code, bn: bn || en, en: en || bn });
+  });
+  if (!list.length) return toast(L('অন্তত একটি একক দিন', 'Add at least one unit'), 'err');
+  const res = await doWrite(API.setMeta({ key: 'units', value: JSON.stringify(list) }), L('একক হালনাগাদ হয়েছে', 'Units updated'));
+  if (res) { closeModal(); renderView(); }
+}
+
+/* ---- sections (real entity: addSection / updateSection) ---- */
+window.openManageSections = function () {
+  requireWrite(() => {
+    modal(L('সেকশন ব্যবস্থাপনা', 'Manage sections'),
+      `<div class="list">${STATE.sections.slice().sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)).map((s) => `<div class="list-item"><span class="name">${esc(s.name_bn)}${s.name_en ? ` <span class="tag">${esc(s.name_en)}</span>` : ''}</span>${isActive(s) ? '' : `<span class="badge badge-void">${L('নিষ্ক্রিয়', 'inactive')}</span>`}<button class="btn btn-sm" onclick="openSectionForm('${s.section_id}')">${L('সম্পাদনা', 'Edit')}</button></div>`).join('')}</div>
+       <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="openSectionForm()">+ ${L('নতুন সেকশন', 'New section')}</button></div>`,
+      [{ label: L('বন্ধ', 'Close'), onClick: closeModal }]);
+  });
+};
+window.openSectionForm = function (id) {
+  const s = id ? sectionOf(id) : null;
+  modal(s ? L('সেকশন সম্পাদনা', 'Edit section') : L('নতুন সেকশন', 'New section'),
+    `<div class="form-grid">
+       <div class="field"><label>${L('নাম (বাংলা)', 'Name (Bengali)')}</label><input type="text" id="secBn" value="${esc(s ? s.name_bn : '')}"></div>
+       <div class="field"><label>${L('নাম (ইংরেজি)', 'Name (English)')}</label><input type="text" id="secEn" value="${esc(s ? s.name_en : '')}" placeholder="${L('ঐচ্ছিক', 'optional')}"></div>
+       ${s ? `<label class="check"><input type="checkbox" id="secActive" ${isActive(s) ? 'checked' : ''}> ${L('সক্রিয়', 'Active')}</label>` : ''}
+     </div>`,
+    [{ label: L('সংরক্ষণ', 'Save'), primary: true, onClick: () => saveSection(id) }, { label: L('← ফিরে', 'Back'), onClick: () => openManageSections() }]);
+};
+async function saveSection(id) {
+  const p = { name_bn: $('secBn').value.trim(), name_en: $('secEn').value.trim() };
+  if (!p.name_bn) return toast(L('নাম দিন', 'Enter a name'), 'err');
+  let res;
+  if (id) { p.section_id = id; if ($('secActive')) p.active = $('secActive').checked; res = await doWrite(API.updateSection(p), L('সেকশন হালনাগাদ হয়েছে', 'Section updated')); }
+  else res = await doWrite(API.addSection(p), L('সেকশন যোগ হয়েছে', 'Section added'));
+  if (res) openManageSections();
 }

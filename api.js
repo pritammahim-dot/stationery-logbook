@@ -96,6 +96,20 @@ const API = (function () {
       ['name_bn', 'designation', 'section_id', 'active'].forEach((f) => { if (p[f] !== undefined) u[f] = p[f]; });
       u.updated_at = nowIso(); return ok({ user: u });
     }
+    if (action === 'addSection') {
+      const m = need(['name_bn']); if (m) return err('validation', { field: m });
+      const n = seq('section_seq'); const section = { section_id: 'SEC-' + pad(n, 2), name_bn: p.name_bn, name_en: p.name_en || '', sort_order: n, active: 'TRUE' };
+      s.sections.push(section); return ok({ section });
+    }
+    if (action === 'updateSection') {
+      const sec = s.sections.find((x) => x.section_id === p.section_id); if (!sec) return err('not_found', { id: p.section_id });
+      ['name_bn', 'name_en', 'sort_order', 'active'].forEach((f) => { if (p[f] !== undefined) sec[f] = (f === 'active') ? (p[f] ? 'TRUE' : 'FALSE') : p[f]; });
+      return ok({ section: sec });
+    }
+    if (action === 'setMeta') {
+      const m = need(['key']); if (m) return err('validation', { field: m });
+      s.meta[p.key] = p.value; return ok({ key: p.key, value: p.value });
+    }
     if (action === 'stockIn') {
       const m = need(['date', 'item_id', 'qty']); if (m) return err('validation', { field: m });
       if (!(Number(p.qty) > 0)) return err('validation', { field: 'qty' });
@@ -132,6 +146,9 @@ const API = (function () {
     updateUser: (p) => call('updateUser', p),
     stockIn: (p) => call('stockIn', p),
     stockOut: (p) => call('stockOut', p),
-    voidEntry: (p) => call('voidEntry', p)
+    voidEntry: (p) => call('voidEntry', p),
+    addSection: (p) => call('addSection', p),
+    updateSection: (p) => call('updateSection', p),
+    setMeta: (p) => call('setMeta', p)
   };
 })();

@@ -79,6 +79,8 @@ function doPost(e) {
       case 'updateItem': out = updateItem(req.payload, req); break;
       case 'addUser':    out = addUser(req.payload, req); break;
       case 'updateUser': out = updateUser(req.payload, req); break;
+      case 'addSection':    out = addSection(req.payload, req); break;
+      case 'updateSection': out = updateSection(req.payload, req); break;
       case 'stockIn':    out = stockIn(req.payload, req); break;
       case 'stockOut':   out = stockOut(req.payload, req); break;
       case 'voidEntry':  out = voidEntry(req.payload, req); break;
@@ -171,6 +173,28 @@ function updateUser(p, req) {
   found.obj.updated_at = nowIso();
   writeRow(TABS.users, found);
   return { ok: true, code: 'ok', data: { user: found.obj } };
+}
+
+function addSection(p, req) {
+  var miss = required(p, ['name_bn']); if (miss) return miss;
+  var n = nextSeq('section_seq');
+  var obj = { section_id: 'SEC-' + pad(n, 2), name_bn: str(p.name_bn), name_en: str(p.name_en), sort_order: n, active: 'TRUE' };
+  appendObj(TABS.sections, obj);
+  return { ok: true, code: 'ok', data: { section: obj } };
+}
+
+function updateSection(p, req) {
+  var miss = required(p, ['section_id']); if (miss) return miss;
+  var found = findRow(TABS.sections, 'section_id', p.section_id);
+  if (!found) return { ok: false, code: 'not_found', data: { id: p.section_id } };
+  ['name_bn', 'name_en', 'sort_order', 'active'].forEach(function (f) {
+    if (p[f] !== undefined) {
+      if (f === 'active') found.obj[f] = (p[f] === false || p[f] === 'FALSE') ? 'FALSE' : 'TRUE';
+      else found.obj[f] = str(p[f]);
+    }
+  });
+  writeRow(TABS.sections, found);
+  return { ok: true, code: 'ok', data: { section: found.obj } };
 }
 
 function stockIn(p, req) {
@@ -390,12 +414,13 @@ function nowIso() { return Utilities.formatDate(new Date(), tz(), "yyyy-MM-dd'T'
 
 function audit(action, data, req) {
   try {
-    var entity = data && data.entity ? data.entity : (data && data.item ? 'item' : data && data.user ? 'user' : '');
+    var entity = data && data.entity ? data.entity : (data && data.item ? 'item' : data && data.user ? 'user' : data && data.section ? 'section' : '');
     var id = '';
     if (data) {
       if (data.txn) id = data.txn.txn_id;
       else if (data.item) id = data.item.item_id;
       else if (data.user) id = data.user.user_id;
+      else if (data.section) id = data.section.section_id;
       else if (data.key) id = data.key;
     }
     appendObj(TABS.audit, {
