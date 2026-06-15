@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+  <title>স্টেশনারি স্টক রেজিস্টার</title>
+  <meta name="description" content="Stationery inventory logbook — stock in/out, balances, reports." />
+  <meta name="theme-color" content="#0f7a5a" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=1" />
+</head>
+<body>
+  <!-- top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <h1 id="appTitle">স্টেশনারি স্টক রেজিস্টার</h1>
+      <span class="sub" id="appSub">পরিকল্পনা ও উন্নয়ন বিভাগ</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="topbar-actions">
+      <span class="demo-badge" id="demoBadge" hidden>ডেমো</span>
+      <button class="lang-btn" id="langBtn" title="Language">EN</button>
+      <button class="pin-chip" id="pinChip" title="Unlock editing">🔒 <span id="pinLabel">লক</span></button>
+    </div>
+  </header>
+
+  <!-- tabs -->
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="dashboard">ড্যাশবোর্ড<span class="en">Dashboard</span></button>
+    <button class="tab" data-view="stockin">স্টক ইন<span class="en">Stock In</span></button>
+    <button class="tab" data-view="stockout">স্টক আউট<span class="en">Stock Out</span></button>
+    <button class="tab" data-view="stock">স্টক<span class="en">Balances</span></button>
+    <button class="tab" data-view="items">আইটেম<span class="en">Items</span></button>
+    <button class="tab" data-view="users">কর্মী<span class="en">Users</span></button>
+    <button class="tab" data-view="reports">রিপোর্ট<span class="en">Reports</span></button>
+  </nav>
+
+  <main class="wrap">
+    <div id="loading" class="empty">লোড হচ্ছে…</div>
+
+    <section class="view" id="view-dashboard"></section>
+    <section class="view" id="view-stockin"></section>
+    <section class="view" id="view-stockout"></section>
+    <section class="view" id="view-stock"></section>
+    <section class="view" id="view-items"></section>
+    <section class="view" id="view-users"></section>
+    <section class="view" id="view-reports"></section>
+    <section class="view" id="view-slip"></section>
+  </main>
+
+  <!-- modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3 id="modalTitle">—</h3><button class="x" id="modalClose" aria-label="Close">×</button></div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-foot" id="modalFoot"></div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <script src="config.js?v=1"></script>
+  <script src="compute.js?v=1"></script>
+  <script src="demo-data.js?v=1"></script>
+  <script src="api.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>

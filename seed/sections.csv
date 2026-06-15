@@ -1,0 +1,5 @@
+section_id,name_bn,name_en,sort_order,active
+SEC-01,পরিকল্পনা ও উন্নয়ন,Planning & Development,1,TRUE
+SEC-02,পূর্ত কর্ম,Civil Works,2,TRUE
+SEC-03,নকশা ও পরিদর্শন,Design & Inspection,3,TRUE
+SEC-04,রেস্টহাউজ,Rest House,4,TRUE

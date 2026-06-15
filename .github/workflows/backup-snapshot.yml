@@ -1,0 +1,35 @@
+# Optional: nightly off-Google backup of the whole sheet into git (a versioned,
+# tamper-evident history). Reads are open, so no secret is needed — only the URL.
+#
+# To enable: repo Settings → Secrets and variables → Actions → Variables →
+# add a repository variable named API_URL = your Apps Script /exec URL.
+name: Nightly snapshot
+
+on:
+  schedule:
+    - cron: '0 20 * * *'   # 02:00 Asia/Dhaka (UTC+6)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch sheet snapshot
+        env:
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then echo "API_URL variable not set — skipping."; exit 0; fi
+          mkdir -p data
+          curl -sSL "$API_URL?action=getAll" -o data/snapshot.json
+          node -e "JSON.parse(require('fs').readFileSync('data/snapshot.json','utf8')); console.log('valid JSON')"
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/snapshot.json
+          git diff --staged --quiet || git commit -m "chore: nightly sheet snapshot"
+          git push
