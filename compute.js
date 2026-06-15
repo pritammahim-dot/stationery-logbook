@@ -141,10 +141,93 @@
     };
   }
 
+  /* ---------- requirements / procurement cycles ---------- */
+
+  // a section's effective requirement for an item in a cycle:
+  // the explicit section-level figure if entered, else the roll-up of its users' figures.
+  function effectiveSectionReq(reqs, cycleId, sectionId, itemId, userIds) {
+    for (var i = 0; i < (reqs || []).length; i++) {
+      var r = reqs[i];
+      if (r.cycle_id === cycleId && r.scope === 'section' && r.scope_id === sectionId && r.item_id === itemId) {
+        var q = num(r.qty); if (q > 0) return q;
+      }
+    }
+    var sum = 0;
+    (reqs || []).forEach(function (r) { if (r.cycle_id === cycleId && r.scope === 'user' && r.item_id === itemId && (userIds || []).indexOf(r.scope_id) >= 0) sum += num(r.qty); });
+    return sum;
+  }
+
+  function userReq(reqs, cycleId, userId, itemId) {
+    for (var i = 0; i < (reqs || []).length; i++) {
+      var r = reqs[i];
+      if (r.cycle_id === cycleId && r.scope === 'user' && r.scope_id === userId && r.item_id === itemId) return num(r.qty);
+    }
+    return 0;
+  }
+
+  function usersBySection(users) {
+    var m = {}; (users || []).forEach(function (u) { (m[u.section_id] = m[u.section_id] || []).push(u.user_id); }); return m;
+  }
+
+  // consolidated purchase estimate for a cycle: per item, total required across
+  // sections (section figure or rolled-up users), current on-hand, and net to buy.
+  function consolidatedEstimate(state, cycleId) {
+    var reqs = state.requirements || [], sections = state.sections || [];
+    var balances = computeBalances(state.items, state.stockIn, state.stockOut);
+    var ubs = usersBySection(state.users);
+    var itemIds = [], seen = {};
+    reqs.forEach(function (r) { if (r.cycle_id === cycleId && !seen[r.item_id]) { seen[r.item_id] = 1; itemIds.push(r.item_id); } });
+    return itemIds.map(function (itemId) {
+      var required = 0, bySec = {};
+      sections.forEach(function (s) { var q = effectiveSectionReq(reqs, cycleId, s.section_id, itemId, ubs[s.section_id] || []); if (q > 0) { bySec[s.section_id] = q; required += q; } });
+      var bal = balances[itemId] ? balances[itemId].balance : 0;
+      return { item_id: itemId, required: required, onHand: bal, toBuy: Math.max(0, required - bal), bySec: bySec };
+    });
+  }
+
+  // qty issued per item within a cycle, for one section/user
+  function issuedInCycle(stockOut, cycleId, key, id) {
+    var m = {};
+    (stockOut || []).forEach(function (r) { if (isLive(r) && String(r.cycle_id) === String(cycleId) && r[key] === id) m[r.item_id] = (m[r.item_id] || 0) + num(r.qty); });
+    return m;
+  }
+
+  // per-item: requirement (limit) vs issued in the cycle, with remaining + over flag
+  function usageVsRequirement(state, cycleId, scope, scopeId) {
+    var reqs = state.requirements || [], users = state.users || [];
+    var key = scope === 'user' ? 'user_id' : 'section_id';
+    var issued = issuedInCycle(state.stockOut, cycleId, key, scopeId);
+    var userIds = scope === 'user' ? [] : users.filter(function (u) { return u.section_id === scopeId; }).map(function (u) { return u.user_id; });
+    var itemset = {};
+    reqs.forEach(function (r) {
+      if (r.cycle_id !== cycleId) return;
+      if (scope === 'section' && ((r.scope === 'section' && r.scope_id === scopeId) || (r.scope === 'user' && userIds.indexOf(r.scope_id) >= 0))) itemset[r.item_id] = 1;
+      if (scope === 'user' && r.scope === 'user' && r.scope_id === scopeId) itemset[r.item_id] = 1;
+    });
+    Object.keys(issued).forEach(function (id) { itemset[id] = 1; });
+    return Object.keys(itemset).map(function (itemId) {
+      var required = scope === 'user' ? userReq(reqs, cycleId, scopeId, itemId) : effectiveSectionReq(reqs, cycleId, scopeId, itemId, userIds);
+      var iss = issued[itemId] || 0;
+      return { item_id: itemId, required: required, issued: iss, remaining: required - iss, over: required > 0 && iss > required };
+    });
+  }
+
+  // remaining quota for one (scope, item) — used by the at-issue warning
+  function quotaRemaining(state, cycleId, scope, scopeId, itemId) {
+    var reqs = state.requirements || [], users = state.users || [];
+    var key = scope === 'user' ? 'user_id' : 'section_id';
+    var issued = issuedInCycle(state.stockOut, cycleId, key, scopeId)[itemId] || 0;
+    var userIds = scope === 'user' ? [] : users.filter(function (u) { return u.section_id === scopeId; }).map(function (u) { return u.user_id; });
+    var required = scope === 'user' ? userReq(reqs, cycleId, scopeId, itemId) : effectiveSectionReq(reqs, cycleId, scopeId, itemId, userIds);
+    return { required: required, issued: issued, remaining: required - issued };
+  }
+
   return {
     num: num, isLive: isLive, monthOf: monthOf, reorderOf: reorderOf, isActiveMaster: isActiveMaster,
     computeBalances: computeBalances, balanceOf: balanceOf, monthlyPivot: monthlyPivot,
     groupOut: groupOut, userWiseOut: userWiseOut, sectionWiseOut: sectionWiseOut,
-    lowStock: lowStock, topConsumers: topConsumers, monthlyTrend: monthlyTrend, recomputeAll: recomputeAll
+    lowStock: lowStock, topConsumers: topConsumers, monthlyTrend: monthlyTrend, recomputeAll: recomputeAll,
+    effectiveSectionReq: effectiveSectionReq, userReq: userReq, consolidatedEstimate: consolidatedEstimate,
+    issuedInCycle: issuedInCycle, usageVsRequirement: usageVsRequirement, quotaRemaining: quotaRemaining
   };
 });

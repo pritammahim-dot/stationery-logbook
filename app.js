@@ -12,11 +12,11 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': 
 
 const CFG = window.APP_CONFIG || {};
 const STATE = {
-  sections: [], items: [], users: [], stockIn: [], stockOut: [], meta: {},
+  sections: [], items: [], users: [], stockIn: [], stockOut: [], cycles: [], requirements: [], meta: {},
   d: {}, lang: localStorage.getItem('sl_lang') || CFG.DEFAULT_LANG || 'bn', view: 'dashboard',
   itemById: new Map(), userById: new Map(), sectionById: new Map(),
   // per-view UI state
-  ui: { stockFilter: { q: '', cat: '', low: false }, itemFilter: { q: '', cat: '', inactive: false }, userFilter: { q: '', sec: '', inactive: false }, rep: { type: 'out', from: '', to: '', sec: '', user: '' } }
+  ui: { stockFilter: { q: '', cat: '', low: false }, itemFilter: { q: '', cat: '', inactive: false }, userFilter: { q: '', sec: '', inactive: false }, rep: { type: 'out', from: '', to: '', sec: '', user: '' }, req: { cycleId: '', tab: 'entry', scope: 'section', scopeId: '' } }
 };
 
 const L = (bn, en) => (STATE.lang === 'bn' ? bn : en);
@@ -78,7 +78,7 @@ function wireChrome() {
 async function load() {
   const res = await API.getAll();
   if (!res || !res.ok) { $('loading').textContent = L('ডেটা লোড করা যায়নি — ', 'Could not load data — ') + (res && res.data ? (res.data.msg || res.code) : 'error'); return; }
-  Object.assign(STATE, { sections: res.data.sections || [], items: res.data.items || [], users: res.data.users || [], stockIn: res.data.stockIn || [], stockOut: res.data.stockOut || [], meta: res.data.meta || {} });
+  Object.assign(STATE, { sections: res.data.sections || [], items: res.data.items || [], users: res.data.users || [], stockIn: res.data.stockIn || [], stockOut: res.data.stockOut || [], cycles: res.data.cycles || [], requirements: res.data.requirements || [], meta: res.data.meta || {} });
   recompute();
   $('loading').hidden = true;
   renderView();
@@ -102,7 +102,7 @@ function switchView(view) {
 
 function renderView() {
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-  const map = { dashboard: renderDashboard, stockin: renderStockIn, stockout: renderStockOut, stock: renderStock, items: renderItems, users: renderUsers, reports: renderReports, slip: () => {} };
+  const map = { dashboard: renderDashboard, stockin: renderStockIn, stockout: renderStockOut, stock: renderStock, items: renderItems, users: renderUsers, requirements: renderRequirements, reports: renderReports, slip: () => {} };
   const id = 'view-' + STATE.view;
   const host = $(id); if (!host) return;
   host.classList.add('active');
@@ -286,6 +286,7 @@ function renderStockOut() {
     <div class="card"><div class="card-head"><h2>${L('স্টক বিতরণ (আউট)', 'Stock Out')}</h2><span class="sub">${L('কর্মীকে মালামাল ইস্যু করুন', 'issue supplies to staff')}</span></div>
       <div class="form-grid two">
         <div class="field"><label>${L('তারিখ', 'Date')}</label><input type="date" id="soDate" value="${todayISO()}"></div>
+        <div class="field"><label>${L('ক্রয় চক্র', 'Purchase cycle')}</label><select id="soCycle">${cycleSelectForOut()}</select><div class="hint" id="soQuota"></div></div>
         <div class="field"><label>${L('কর্মী', 'User')}</label><select id="soUser"><option value="">${L('— নির্বাচন —', '— select —')}</option>${userOptions()}</select>
           <div class="hint" id="soSection">${L('সেকশন স্বয়ংক্রিয়ভাবে আসবে', 'section auto-fills')}</div></div>
         <div class="field"><label>${L('আইটেম', 'Item')}</label><select id="soItem"><option value="">${L('— নির্বাচন —', '— select —')}</option>${itemOptions()}</select>
@@ -307,9 +308,10 @@ function renderStockOut() {
   $('soUser').addEventListener('change', onSoUser);
   $('soItem').addEventListener('change', onSoBal);
   $('soQty').addEventListener('input', onSoBal);
+  $('soCycle').addEventListener('change', onSoBal);
   $('soSave').addEventListener('click', saveStockOut);
 }
-function onSoUser() { const u = userOf($('soUser').value); $('soSection').textContent = u ? L('সেকশন: ', 'Section: ') + sectionNameById(u.section_id) : L('সেকশন স্বয়ংক্রিয়ভাবে আসবে', 'section auto-fills'); }
+function onSoUser() { const u = userOf($('soUser').value); $('soSection').textContent = u ? L('সেকশন: ', 'Section: ') + sectionNameById(u.section_id) : L('সেকশন স্বয়ংক্রিয়ভাবে আসবে', 'section auto-fills'); onSoBal(); }
 function onSoBal() {
   const id = $('soItem').value, bal = id ? balanceOf(id) : null, qty = enNum($('soQty').value);
   const it = itemOf(id);
@@ -321,15 +323,30 @@ function onSoBal() {
   if (over) { w.textContent = L(`স্টকে নেই — ব্যালেন্স ${nf(bal)}`, `Not enough — balance ${bal}`); w.className = 'hint bad'; }
   else if (id && qty > 0) { w.textContent = L(`ইস্যুর পর ব্যালেন্স: ${nf(bal - qty)}`, `Balance after: ${bal - qty}`); w.className = 'hint good'; }
   else { w.textContent = ''; w.className = 'hint'; }
+  // procurement quota (warn but allow)
+  const qEl = $('soQuota');
+  if (qEl) {
+    const cycleId = ($('soCycle') || {}).value || '', uid = ($('soUser') || {}).value || '';
+    if (cycleId && uid && id && qty > 0) {
+      const u = userOf(uid);
+      const usrQ = Compute.quotaRemaining(STATE, cycleId, 'user', uid, id);
+      const secQ = Compute.quotaRemaining(STATE, cycleId, 'section', u ? u.section_id : '', id);
+      if (usrQ.required > 0 && qty > usrQ.remaining) { qEl.textContent = L(`কর্মীর চাহিদা সীমা ছাড়াবে (বাকি ${nf(usrQ.remaining)})`, `Over user limit (remaining ${usrQ.remaining})`); qEl.className = 'hint bad'; }
+      else if (secQ.required > 0 && qty > secQ.remaining) { qEl.textContent = L(`সেকশনের চাহিদা সীমা ছাড়াবে (বাকি ${nf(secQ.remaining)})`, `Over section limit (remaining ${secQ.remaining})`); qEl.className = 'hint bad'; }
+      else if (usrQ.required > 0 || secQ.required > 0) { const base = usrQ.required > 0 ? usrQ : secQ; qEl.textContent = L(`চাহিদা সীমার মধ্যে (বাকি ${nf(base.remaining - qty)})`, `Within limit (remaining ${base.remaining - qty})`); qEl.className = 'hint good'; }
+      else { qEl.textContent = ''; qEl.className = 'hint'; }
+    } else { qEl.textContent = ''; qEl.className = 'hint'; }
+  }
 }
 function saveStockOut() {
   const date = $('soDate').value, user_id = $('soUser').value, item_id = $('soItem').value, qty = enNum($('soQty').value);
   if (!date || !user_id || !item_id) return toast(L('তারিখ, কর্মী ও আইটেম দিন', 'Pick date, user and item'), 'err');
   if (!(qty > 0)) { $('soQty').classList.add('bad'); return toast(L('পরিমাণ লিখুন', 'Enter a quantity'), 'err'); }
   const allowNegative = ($('soOverride') || {}).checked || false;
+  const cycle_id = ($('soCycle') || {}).value || '';
   if (qty > balanceOf(item_id) && !allowNegative) return toast(L('স্টকে যথেষ্ট নেই', 'Insufficient stock'), 'err');
   requireWrite(async () => {
-    const r = await doWrite(API.stockOut({ date, user_id, item_id, qty, allowNegative }), L('বিতরণ সংরক্ষিত হয়েছে', 'Issue saved'));
+    const r = await doWrite(API.stockOut({ date, user_id, item_id, qty, allowNegative, cycle_id }), L('বিতরণ সংরক্ষিত হয়েছে', 'Issue saved'));
     if (r && r.data && r.data.txn) { const txn = r.data.txn; renderStockOut(); offerSlip(txn.txn_id); }
   });
 }
@@ -666,4 +683,144 @@ async function saveSection(id) {
   if (id) { p.section_id = id; if ($('secActive')) p.active = $('secActive').checked; res = await doWrite(API.updateSection(p), L('সেকশন হালনাগাদ হয়েছে', 'Section updated')); }
   else res = await doWrite(API.addSection(p), L('সেকশন যোগ হয়েছে', 'Section added'));
   if (res) openManageSections();
+}
+
+/* ============================ REQUIREMENTS / PROCUREMENT CYCLES ============================ */
+const openCycles = () => STATE.cycles.filter((c) => String(c.status || 'open').toLowerCase() !== 'closed');
+function cycleById(id) { return STATE.cycles.find((c) => c.cycle_id === id); }
+function cycleLabel(c) { return c ? (c.name + (String(c.status).toLowerCase() === 'closed' ? ' (' + L('বন্ধ', 'closed') + ')' : '')) : '—'; }
+function ensureReqCycle() {
+  if (STATE.ui.req.cycleId && cycleById(STATE.ui.req.cycleId)) return;
+  STATE.ui.req.cycleId = ((openCycles()[0] || STATE.cycles[0] || {}).cycle_id) || '';
+}
+function cycleOptions(selectedId) { return STATE.cycles.map((c) => `<option value="${c.cycle_id}" ${c.cycle_id === selectedId ? 'selected' : ''}>${esc(cycleLabel(c))}</option>`).join(''); }
+// cycle dropdown for the Stock Out form: a "no cycle" option + cycles, defaulting to the open one
+function cycleSelectForOut() {
+  const def = (openCycles()[0] || {}).cycle_id || '';
+  return `<option value="">${L('— চক্র ছাড়া —', '— no cycle —')}</option>` + STATE.cycles.map((c) => `<option value="${c.cycle_id}" ${c.cycle_id === def ? 'selected' : ''}>${esc(cycleLabel(c))}</option>`).join('');
+}
+window.setReqTab = function (k) { STATE.ui.req.tab = k; renderRequirements(); };
+window.setReqCycle = function (v) { STATE.ui.req.cycleId = v; renderRequirements(); };
+window.setReqScope = function (scope) { STATE.ui.req.scope = scope; STATE.ui.req.scopeId = ''; renderRequirements(); };
+window.setReqScopeId = function (v) { STATE.ui.req.scopeId = v; renderRequirements(); };
+
+function renderRequirements() {
+  ensureReqCycle();
+  const host = $('view-requirements'), r = STATE.ui.req;
+  if (!STATE.cycles.length) {
+    host.innerHTML = `<div class="card"><div class="card-head"><h2>${L('চাহিদা ও ক্রয় চক্র', 'Requirements & purchase cycles')}</h2></div>
+      <div class="empty">${L('এখনো কোনো ক্রয় চক্র তৈরি হয়নি। প্রতি ৩–৪ মাসে একটি চক্র খুলুন, সেকশনভিত্তিক চাহিদা যোগ করুন, একত্রিত এস্টিমেট দেখে ক্রয় করুন।', 'No purchase cycle yet. Open one every 3–4 months, add requirements per section, then buy from the consolidated estimate.')}<br><br><button class="btn btn-primary" onclick="openCycleForm()">+ ${L('নতুন চক্র তৈরি করুন', 'Create a cycle')}</button></div></div>`;
+    return;
+  }
+  const subBtn = (k, bn, en) => `<button class="btn btn-sm ${r.tab === k ? 'btn-primary' : ''}" onclick="setReqTab('${k}')">${L(bn, en)}</button>`;
+  const cyc = cycleById(r.cycleId);
+  const body = r.tab === 'estimate' ? reqEstimate() : r.tab === 'usage' ? reqUsage() : reqEntry();
+  host.innerHTML = `
+    <div class="card"><div class="card-head"><h2>${L('চাহিদা ও ক্রয় চক্র', 'Requirements & purchase cycle')}</h2><span class="spacer"></span>
+      <button class="btn btn-sm" onclick="openManageCycles()">⚙ ${L('চক্র', 'Cycles')}</button></div>
+      <div class="toolbar">
+        <div class="field grow"><label class="en">${L('ক্রয় চক্র', 'Purchase cycle')}</label><select onchange="setReqCycle(this.value)">${cycleOptions(r.cycleId)}</select></div>
+        ${cyc ? `<div class="hint">${cyc.start_date ? dDate(cyc.start_date) : '…'} – ${cyc.end_date ? dDate(cyc.end_date) : '…'} · ${String(cyc.status).toLowerCase() === 'closed' ? L('বন্ধ', 'closed') : L('চলমান', 'open')}</div>` : ''}
+      </div>
+      <div class="btn-row no-print">${subBtn('entry', 'চাহিদা এন্ট্রি', 'Entry')}${subBtn('estimate', 'একত্রিত এস্টিমেট', 'Estimate')}${subBtn('usage', 'ব্যবহার ট্র্যাকিং', 'Usage')}</div>
+    </div>
+    <div class="card">${body}</div>`;
+}
+
+function reqScopeControls() {
+  const r = STATE.ui.req;
+  const btns = `<div class="btn-row" style="margin-bottom:0"><button class="btn btn-sm ${r.scope === 'section' ? 'btn-primary' : ''}" onclick="setReqScope('section')">${L('সেকশন', 'Section')}</button><button class="btn btn-sm ${r.scope === 'user' ? 'btn-primary' : ''}" onclick="setReqScope('user')">${L('কর্মী', 'User')}</button></div>`;
+  const sel = r.scope === 'section'
+    ? `<select onchange="setReqScopeId(this.value)"><option value="">${L('— সেকশন বাছুন —', '— pick section —')}</option>${STATE.sections.map((s) => `<option value="${s.section_id}" ${r.scopeId === s.section_id ? 'selected' : ''}>${esc(sectionName(s))}</option>`).join('')}</select>`
+    : `<select onchange="setReqScopeId(this.value)"><option value="">${L('— কর্মী বাছুন —', '— pick user —')}</option>${STATE.users.filter(isActive).sort((a, b) => userName(a).localeCompare(userName(b))).map((u) => `<option value="${u.user_id}" ${r.scopeId === u.user_id ? 'selected' : ''}>${esc(userName(u))} — ${esc(sectionNameById(u.section_id))}</option>`).join('')}</select>`;
+  return `<div class="toolbar">${btns}<div class="field grow">${sel}</div></div>`;
+}
+
+function reqEntry() {
+  const r = STATE.ui.req, controls = reqScopeControls();
+  if (!r.scopeId) return `<div class="card-head"><h2>${L('চাহিদা এন্ট্রি', 'Requirement entry')}</h2></div>${controls}<div class="empty">${L('উপরে একটি সেকশন বা কর্মী বাছুন, তারপর তাদের চাহিদা যোগ করুন।', 'Pick a section or user above, then add their requirements.')}</div>`;
+  const lines = STATE.requirements.filter((x) => x.cycle_id === r.cycleId && x.scope === r.scope && x.scope_id === r.scopeId && Number(x.qty) > 0).sort((a, b) => itemNameById(a.item_id).localeCompare(itemNameById(b.item_id)));
+  const scopeName = r.scope === 'section' ? sectionNameById(r.scopeId) : userNameById(r.scopeId);
+  return `<div class="card-head"><h2>${L('চাহিদা এন্ট্রি', 'Requirement entry')}</h2><span class="sub">${esc(scopeName)}</span></div>
+    ${controls}
+    <div class="form-grid two" style="align-items:end;margin-top:6px">
+      <div class="field"><label>${L('আইটেম', 'Item')}</label><select id="reqItem">${itemOptions()}</select></div>
+      <div class="field"><label>${L('চাহিদার পরিমাণ', 'Required qty')}</label><div style="display:flex;gap:8px"><input type="number" id="reqQty" min="0" step="1" placeholder="0" style="flex:1"><button class="btn btn-primary" onclick="addReqLine()">${L('সেট', 'Set')}</button></div></div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px">${lines.length ? `<table><thead><tr><th>${L('আইটেম', 'Item')}</th><th class="num">${L('চাহিদা', 'Required')}</th><th></th></tr></thead><tbody>
+      ${lines.map((x) => `<tr><td>${esc(itemNameById(x.item_id))}</td><td class="num">${nf(x.qty)} ${unitLabel((itemOf(x.item_id) || {}).unit)}</td><td class="t-actions"><button class="btn btn-sm" onclick="editReqLine('${x.item_id}',${Number(x.qty)})">${L('সম্পাদনা', 'Edit')}</button><button class="btn btn-sm btn-danger" onclick="removeReqLine('${x.item_id}')">${L('মুছুন', 'Remove')}</button></td></tr>`).join('')}
+    </tbody></table>` : `<div class="empty">${L('এই তালিকায় এখনো কিছু নেই।', 'Nothing on this list yet.')}</div>`}</div>`;
+}
+window.addReqLine = function () {
+  const r = STATE.ui.req, item_id = $('reqItem').value, qty = enNum($('reqQty').value);
+  if (!item_id) return toast(L('আইটেম বাছুন', 'Pick an item'), 'err');
+  if (!(qty > 0)) return toast(L('পরিমাণ লিখুন', 'Enter a quantity'), 'err');
+  requireWrite(async () => { await doWrite(API.setRequirement({ cycle_id: r.cycleId, scope: r.scope, scope_id: r.scopeId, item_id, qty }), L('চাহিদা সংরক্ষিত', 'Requirement saved')); });
+};
+window.editReqLine = function (itemId, qty) { const s = $('reqItem'); if (s) s.value = itemId; const q = $('reqQty'); if (q) { q.value = qty; q.focus(); } };
+window.removeReqLine = function (itemId) {
+  const r = STATE.ui.req;
+  requireWrite(async () => { await doWrite(API.setRequirement({ cycle_id: r.cycleId, scope: r.scope, scope_id: r.scopeId, item_id: itemId, qty: 0 }), L('সরানো হয়েছে', 'Removed')); });
+};
+
+function reqEstimate() {
+  const est = Compute.consolidatedEstimate(STATE, STATE.ui.req.cycleId).sort((a, b) => itemNameById(a.item_id).localeCompare(itemNameById(b.item_id)));
+  if (!est.length) return `<div class="card-head"><h2>${L('একত্রিত ক্রয় এস্টিমেট', 'Consolidated purchase estimate')}</h2></div><div class="empty">${L('এই চক্রে এখনো কোনো চাহিদা যোগ করা হয়নি।', 'No requirements entered for this cycle yet.')}</div>`;
+  return `<div class="card-head"><h2>${L('একত্রিত ক্রয় এস্টিমেট', 'Consolidated purchase estimate')}</h2><span class="sub">${L('সব সেকশনের চাহিদা একত্রে', 'all sections combined')}</span><span class="spacer"></span><button class="btn btn-sm no-print" onclick="exportEstimateCSV()">⬇ CSV</button><button class="btn btn-sm" onclick="window.print()">🖨 ${L('প্রিন্ট', 'Print')}</button></div>
+    <div class="table-wrap"><table><thead><tr><th>${L('আইটেম', 'Item')}</th><th>${L('একক', 'Unit')}</th><th class="num">${L('মোট চাহিদা', 'Required')}</th><th class="num">${L('বর্তমান স্টক', 'On hand')}</th><th class="num">${L('ক্রয় করতে হবে', 'To buy')}</th></tr></thead><tbody>
+      ${est.map((e) => `<tr class="${e.toBuy > 0 ? 'low' : ''}"><td>${esc(itemNameById(e.item_id))}</td><td>${unitLabel((itemOf(e.item_id) || {}).unit)}</td><td class="num">${nf(e.required)}</td><td class="num">${nf(e.onHand)}</td><td class="num"><b>${nf(e.toBuy)}</b></td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+window.exportEstimateCSV = function () {
+  const est = Compute.consolidatedEstimate(STATE, STATE.ui.req.cycleId);
+  downloadCSV('purchase_estimate.csv', ['item', 'unit', 'required', 'on_hand', 'to_buy'], est.map((e) => [itemNameById(e.item_id), (itemOf(e.item_id) || {}).unit || '', e.required, e.onHand, e.toBuy]));
+};
+
+function reqUsage() {
+  const r = STATE.ui.req, controls = reqScopeControls();
+  if (!r.scopeId) return `<div class="card-head"><h2>${L('ব্যবহার বনাম সীমা', 'Usage vs limit')}</h2></div>${controls}<div class="empty">${L('উপরে একটি সেকশন বা কর্মী বাছুন।', 'Pick a section or user above.')}</div>`;
+  const rows = Compute.usageVsRequirement(STATE, r.cycleId, r.scope, r.scopeId).sort((a, b) => itemNameById(a.item_id).localeCompare(itemNameById(b.item_id)));
+  const scopeName = r.scope === 'section' ? sectionNameById(r.scopeId) : userNameById(r.scopeId);
+  const headerRow = `<div class="card-head"><h2>${L('ব্যবহার বনাম সীমা', 'Usage vs limit')}</h2><span class="sub">${esc(scopeName)}</span><span class="spacer"></span><button class="btn btn-sm no-print" onclick="exportUsageCSV()">⬇ CSV</button><button class="btn btn-sm" onclick="window.print()">🖨 ${L('প্রিন্ট', 'Print')}</button></div>`;
+  if (!rows.length) return `${headerRow}${controls}<div class="empty">${L('এই চক্রে কোনো চাহিদা বা বিতরণ নেই।', 'No requirement or issue in this cycle.')}</div>`;
+  return `${headerRow}${controls}
+    <div class="table-wrap"><table><thead><tr><th>${L('আইটেম', 'Item')}</th><th class="num">${L('চাহিদা (সীমা)', 'Limit')}</th><th class="num">${L('বিতরণ', 'Issued')}</th><th class="num">${L('বাকি', 'Remaining')}</th><th>${L('অবস্থা', 'Status')}</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr class="${x.over ? 'low' : ''}"><td>${esc(itemNameById(x.item_id))}</td><td class="num">${x.required ? nf(x.required) : '—'}</td><td class="num">${nf(x.issued)}</td><td class="num"><b class="${x.remaining < 0 ? 'badge badge-neg' : ''}">${nf(x.remaining)}</b></td><td>${x.over ? `<span class="badge badge-low">${L('সীমা ছাড়িয়েছে', 'over limit')}</span>` : (x.required ? `<span class="badge badge-ok">${L('সীমার মধ্যে', 'within')}</span>` : '<span class="muted">—</span>')}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+window.exportUsageCSV = function () {
+  const r = STATE.ui.req, rows = Compute.usageVsRequirement(STATE, r.cycleId, r.scope, r.scopeId);
+  downloadCSV('usage_vs_limit.csv', ['item', 'limit', 'issued', 'remaining', 'over'], rows.map((x) => [itemNameById(x.item_id), x.required, x.issued, x.remaining, x.over ? 'YES' : '']));
+};
+
+window.openManageCycles = function () {
+  requireWrite(() => {
+    modal(L('ক্রয় চক্র ব্যবস্থাপনা', 'Manage cycles'),
+      `<div class="list">${STATE.cycles.length ? STATE.cycles.map((c) => `<div class="list-item"><span class="name">${esc(c.name)}<div class="meta">${c.start_date ? dDate(c.start_date) : '…'} – ${c.end_date ? dDate(c.end_date) : '…'}</div></span>${String(c.status).toLowerCase() === 'closed' ? `<span class="badge badge-void">${L('বন্ধ', 'closed')}</span>` : `<span class="badge badge-ok">${L('চলমান', 'open')}</span>`}<button class="btn btn-sm" onclick="openCycleForm('${c.cycle_id}')">${L('সম্পাদনা', 'Edit')}</button></div>`).join('') : `<div class="empty">${L('কোনো চক্র নেই', 'No cycles')}</div>`}</div>
+       <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="openCycleForm()">+ ${L('নতুন চক্র', 'New cycle')}</button></div>`,
+      [{ label: L('বন্ধ', 'Close'), onClick: closeModal }]);
+  });
+};
+window.openCycleForm = function (id) {
+  requireWrite(() => {
+    const c = id ? cycleById(id) : null;
+    modal(c ? L('চক্র সম্পাদনা', 'Edit cycle') : L('নতুন ক্রয় চক্র', 'New purchase cycle'),
+      `<div class="form-grid">
+         <div class="field"><label>${L('চক্রের নাম', 'Cycle name')}</label><input type="text" id="cyName" value="${esc(c ? c.name : '')}" placeholder="${L('যেমন: জুলাই–অক্টোবর ২০২৬', 'e.g. Jul–Oct 2026')}"></div>
+         <div class="form-grid two" style="gap:14px">
+           <div class="field"><label>${L('শুরু', 'Start')}</label><input type="date" id="cyStart" value="${esc(c ? String(c.start_date || '').slice(0, 10) : '')}"></div>
+           <div class="field"><label>${L('শেষ', 'End')}</label><input type="date" id="cyEnd" value="${esc(c ? String(c.end_date || '').slice(0, 10) : '')}"></div>
+         </div>
+         ${c ? `<div class="field"><label>${L('অবস্থা', 'Status')}</label><select id="cyStatus"><option value="open" ${String(c.status).toLowerCase() !== 'closed' ? 'selected' : ''}>${L('চলমান', 'Open')}</option><option value="closed" ${String(c.status).toLowerCase() === 'closed' ? 'selected' : ''}>${L('বন্ধ', 'Closed')}</option></select></div>` : ''}
+       </div>`,
+      [{ label: L('সংরক্ষণ', 'Save'), primary: true, onClick: () => saveCycle(id) }, { label: c ? L('← ফিরে', 'Back') : L('বাতিল', 'Cancel'), onClick: c ? openManageCycles : closeModal }]);
+  });
+};
+async function saveCycle(id) {
+  const p = { name: $('cyName').value.trim(), start_date: $('cyStart').value, end_date: $('cyEnd').value };
+  if (!p.name) return toast(L('নাম দিন', 'Enter a name'), 'err');
+  let res;
+  if (id) { p.cycle_id = id; if ($('cyStatus')) p.status = $('cyStatus').value; res = await doWrite(API.updateCycle(p), L('চক্র হালনাগাদ হয়েছে', 'Cycle updated')); }
+  else res = await doWrite(API.addCycle(p), L('চক্র তৈরি হয়েছে', 'Cycle created'));
+  if (res) { if (res.data && res.data.cycle) STATE.ui.req.cycleId = res.data.cycle.cycle_id; closeModal(); switchView('requirements'); renderRequirements(); }
 }

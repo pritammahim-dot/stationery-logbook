@@ -46,9 +46,12 @@ Do these **in order**. Steps 1–6 are on Google; 7–8 are on GitHub.
 3. **Build the tabs + seed the data.** In the Apps Script editor toolbar, choose
    the function **`setupSheets`** and click **Run** (approve the permission prompt
    the first time — it's your own script). Then choose **`seedMasters`** and **Run**.
-   Your sheet now has all 7 tabs, the 54 items, 23 users and 4 sections.
+   Your sheet now has all 9 tabs (incl. `Cycles` + `Requirements`), the 54 items,
+   23 users and 4 sections.
    *(Alternative to `seedMasters`: import the CSVs in [`seed/`](seed/) into the
    Sections/Items/Users tabs instead.)*
+   *(Re-running `setupSheets` is safe — it also adds any new columns from a later
+   version, e.g. `cycle_id` on `StockOut`.)*
 4. **Set the editing PIN.** In Apps Script: **Project Settings (⚙)** →
    **Script Properties** → **Add script property**: name `WRITE_SECRET`, value =
    a strong passphrase. **This is the PIN staff type to edit.**
@@ -95,6 +98,7 @@ allowlist in `Code.gs`.
 | **স্টক / Balances** | live In / Out / Balance per item; search, category filter, low-stock filter; CSV + print |
 | **আইটেম / Items** | add items, **rename safely**, set unit/category/reorder level/opening balance, activate/deactivate; **⚙ Units** button to add/edit measurement units |
 | **কর্মী / Users** | add/edit staff and their section; **⚙ Sections** button to add/edit/rename sections |
+| **চাহিদা / Requirements** | open a **purchase cycle** (every 3–4 months); enter each **section's** (and optionally each **user's**) requirement list = their **usage quota**; see the **consolidated estimate** (required vs on-hand vs to-buy) for purchasing; **track usage vs limit** per section/user. Stock Out warns (but allows) when an issue would exceed a quota. |
 | **রিপোর্ট / Reports** | Monthly In, Monthly Out, User-wise, and **Detailed (line-item)** — filter by **date range**, **single section**, and **single user**; print / Save-as-PDF / CSV export (respects filters) |
 
 Dropdowns are not fixed: **units** and **sections** are managed in-app (⚙ buttons on the Items / Users tabs), and **category** is a free-text field with suggestions — type a new one anytime.

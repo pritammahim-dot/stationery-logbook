@@ -81,4 +81,44 @@ check('top consumer USR-01 (19)',              top[0].key === 'USR-01' && top[0]
 check('num() strips non-numerics',             C.num('১২') === 0 && C.num('12') === 12 && C.num('3.5') === 3.5);
 check('isLive() defaults to true',             C.isLive({}) === true && C.isLive({ status: 'void' }) === false);
 
+// ---- requirements / procurement cycles ----
+const cs = {
+  items: [{ item_id: 'ITM-0001', opening_balance: 20 }, { item_id: 'ITM-0002', opening_balance: 5 }],
+  sections: [{ section_id: 'SEC-01' }, { section_id: 'SEC-02' }],
+  users: [{ user_id: 'USR-01', section_id: 'SEC-01' }, { user_id: 'USR-02', section_id: 'SEC-01' }, { user_id: 'USR-03', section_id: 'SEC-02' }],
+  stockIn: [{ txn_id: 'IN-1', item_id: 'ITM-0001', qty: 200, status: 'active' }],
+  stockOut: [
+    { txn_id: 'O1', cycle_id: 'CYC-01', user_id: 'USR-01', section_id: 'SEC-01', item_id: 'ITM-0001', qty: 40, status: 'active' },
+    { txn_id: 'O2', cycle_id: 'CYC-01', user_id: 'USR-03', section_id: 'SEC-02', item_id: 'ITM-0001', qty: 10, status: 'active' },
+    { txn_id: 'O4', cycle_id: 'CYC-01', user_id: 'USR-03', section_id: 'SEC-02', item_id: 'ITM-0001', qty: 25, status: 'active' },
+    { txn_id: 'O3', cycle_id: 'CYC-02', user_id: 'USR-01', section_id: 'SEC-01', item_id: 'ITM-0001', qty: 5, status: 'active' }
+  ],
+  requirements: [
+    { cycle_id: 'CYC-01', scope: 'section', scope_id: 'SEC-01', item_id: 'ITM-0001', qty: 100 },
+    { cycle_id: 'CYC-01', scope: 'user', scope_id: 'USR-03', item_id: 'ITM-0001', qty: 30 },   // SEC-02 has no section req -> rolls up to 30
+    { cycle_id: 'CYC-01', scope: 'user', scope_id: 'USR-01', item_id: 'ITM-0002', qty: 10 }     // SEC-01 ITM-0002 rolls up to 10
+  ]
+};
+const s1 = ['USR-01', 'USR-02'], s2 = ['USR-03'];
+check('effectiveSectionReq explicit (100)',    C.effectiveSectionReq(cs.requirements, 'CYC-01', 'SEC-01', 'ITM-0001', s1) === 100);
+check('effectiveSectionReq rollup SEC-02 (30)', C.effectiveSectionReq(cs.requirements, 'CYC-01', 'SEC-02', 'ITM-0001', s2) === 30);
+check('effectiveSectionReq rollup ITM-0002 (10)', C.effectiveSectionReq(cs.requirements, 'CYC-01', 'SEC-01', 'ITM-0002', s1) === 10);
+
+const est = C.consolidatedEstimate(cs, 'CYC-01');
+const e1 = est.find((e) => e.item_id === 'ITM-0001'), e2 = est.find((e) => e.item_id === 'ITM-0002');
+check('estimate ITM-0001 required = 130 (100+30)', e1.required === 130);
+check('estimate ITM-0001 onHand = 140',         e1.onHand === 140);   // 20 + 200 − 80
+check('estimate ITM-0001 toBuy = 0 (stocked)',  e1.toBuy === 0);
+check('estimate ITM-0002 required = 10',        e2.required === 10);
+check('estimate ITM-0002 toBuy = 5 (10−5)',     e2.toBuy === 5);
+
+const uS1 = C.usageVsRequirement(cs, 'CYC-01', 'section', 'SEC-01').find((x) => x.item_id === 'ITM-0001');
+check('usage SEC-01 issued = 40 (cycle-scoped)', uS1.issued === 40 && uS1.required === 100 && uS1.remaining === 60 && uS1.over === false);
+const uS2 = C.usageVsRequirement(cs, 'CYC-01', 'section', 'SEC-02').find((x) => x.item_id === 'ITM-0001');
+check('usage SEC-02 over-quota (35 > 30)',      uS2.issued === 35 && uS2.required === 30 && uS2.over === true);
+const uU3 = C.usageVsRequirement(cs, 'CYC-01', 'user', 'USR-03').find((x) => x.item_id === 'ITM-0001');
+check('usage USR-03 issued = 35 vs req 30',     uU3.issued === 35 && uU3.over === true);
+check('quotaRemaining SEC-01 = 60',             C.quotaRemaining(cs, 'CYC-01', 'section', 'SEC-01', 'ITM-0001').remaining === 60);
+check('cycle scoping excludes other cycles',    C.quotaRemaining(cs, 'CYC-02', 'section', 'SEC-01', 'ITM-0001').issued === 5);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed.');

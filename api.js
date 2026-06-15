@@ -55,7 +55,7 @@ const API = (function () {
   /* ---------------- DEMO backend (in-memory) ---------------- */
   let STORE = null;
   function store() {
-    if (!STORE) STORE = JSON.parse(JSON.stringify(window.DEMO_DATA || { sections: [], items: [], users: [], stockIn: [], stockOut: [], meta: {} }));
+    if (!STORE) STORE = JSON.parse(JSON.stringify(window.DEMO_DATA || { sections: [], items: [], users: [], stockIn: [], stockOut: [], cycles: [], requirements: [], meta: {} }));
     return STORE;
   }
   const pad = (n, w) => { let s = String(n); while (s.length < w) s = '0' + s; return s; };
@@ -110,6 +110,23 @@ const API = (function () {
       const m = need(['key']); if (m) return err('validation', { field: m });
       s.meta[p.key] = p.value; return ok({ key: p.key, value: p.value });
     }
+    if (action === 'addCycle') {
+      const m = need(['name']); if (m) return err('validation', { field: m });
+      const n = seq('cycle_seq'); const cycle = { cycle_id: 'CYC-' + pad(n, 2), name: p.name, start_date: p.start_date || '', end_date: p.end_date || '', status: p.status === 'closed' ? 'closed' : 'open', created_at: nowIso(), created_by: 'demo' };
+      (s.cycles = s.cycles || []).push(cycle); return ok({ cycle });
+    }
+    if (action === 'updateCycle') {
+      const c = (s.cycles || []).find((x) => x.cycle_id === p.cycle_id); if (!c) return err('not_found', { id: p.cycle_id });
+      ['name', 'start_date', 'end_date', 'status'].forEach((f) => { if (p[f] !== undefined) c[f] = p[f]; }); return ok({ cycle: c });
+    }
+    if (action === 'setRequirement') {
+      const m = need(['cycle_id', 'scope', 'scope_id', 'item_id']); if (m) return err('validation', { field: m });
+      s.requirements = s.requirements || []; const qv = Number(p.qty || 0);
+      let r = s.requirements.find((x) => x.cycle_id === p.cycle_id && x.scope === p.scope && x.scope_id === p.scope_id && x.item_id === p.item_id);
+      if (r) { r.qty = qv; r.note = p.note || ''; r.updated_at = nowIso(); }
+      else { r = { req_id: 'REQ-' + pad(seq('req_seq'), 4), cycle_id: p.cycle_id, scope: p.scope, scope_id: p.scope_id, item_id: p.item_id, qty: qv, note: p.note || '', created_at: nowIso(), created_by: 'demo', updated_at: '' }; s.requirements.push(r); }
+      return ok({ requirement: r });
+    }
     if (action === 'stockIn') {
       const m = need(['date', 'item_id', 'qty']); if (m) return err('validation', { field: m });
       if (!(Number(p.qty) > 0)) return err('validation', { field: 'qty' });
@@ -122,7 +139,7 @@ const API = (function () {
       const bal = demoBalance(p.item_id);
       if (Number(p.qty) > bal && !p.allowNegative) return err('insufficient_stock', { itemId: p.item_id, balance: bal, requested: Number(p.qty) });
       const u = s.users.find((x) => x.user_id === p.user_id);
-      const txn = { txn_id: 'OUT-' + p.date.replace(/-/g, '') + '-' + uuid().slice(0, 4), date: p.date, user_id: p.user_id, item_id: p.item_id, qty: Number(p.qty), section_id: u ? u.section_id : '', month: p.date.slice(0, 7), slip_no: 'SLP-' + pad(seq('slip_seq'), 6), status: 'active', created_at: nowIso(), created_by: 'demo' };
+      const txn = { txn_id: 'OUT-' + p.date.replace(/-/g, '') + '-' + uuid().slice(0, 4), date: p.date, user_id: p.user_id, item_id: p.item_id, qty: Number(p.qty), section_id: u ? u.section_id : '', cycle_id: p.cycle_id || '', month: p.date.slice(0, 7), slip_no: 'SLP-' + pad(seq('slip_seq'), 6), status: 'active', created_at: nowIso(), created_by: 'demo' };
       s.stockOut.push(txn); return ok({ txn, entity: 'stockOut', balanceAfter: bal - Number(p.qty) });
     }
     if (action === 'voidEntry') {
@@ -149,6 +166,9 @@ const API = (function () {
     voidEntry: (p) => call('voidEntry', p),
     addSection: (p) => call('addSection', p),
     updateSection: (p) => call('updateSection', p),
-    setMeta: (p) => call('setMeta', p)
+    setMeta: (p) => call('setMeta', p),
+    addCycle: (p) => call('addCycle', p),
+    updateCycle: (p) => call('updateCycle', p),
+    setRequirement: (p) => call('setRequirement', p)
   };
 })();

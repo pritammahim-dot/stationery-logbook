@@ -21,13 +21,15 @@
 'use strict';
 
 var TABS = {
-  sections: 'Sections',
-  items:    'Items',
-  users:    'Users',
-  stockIn:  'StockIn',
-  stockOut: 'StockOut',
-  meta:     'Meta',
-  audit:    'AuditLog'
+  sections:     'Sections',
+  items:        'Items',
+  users:        'Users',
+  stockIn:      'StockIn',
+  stockOut:     'StockOut',
+  meta:         'Meta',
+  audit:        'AuditLog',
+  cycles:       'Cycles',
+  requirements: 'Requirements'
 };
 
 var HEADERS = {
@@ -35,9 +37,11 @@ var HEADERS = {
   Items:     ['item_id', 'name_bn', 'name_en', 'unit', 'category', 'reorder_level', 'opening_balance', 'spec', 'active', 'created_at', 'created_by', 'updated_at'],
   Users:     ['user_id', 'name_bn', 'designation', 'section_id', 'active', 'created_at', 'created_by', 'updated_at'],
   StockIn:   ['txn_id', 'date', 'item_id', 'qty', 'remarks', 'month', 'status', 'created_at', 'created_by', 'void_reason', 'voided_at', 'voided_by'],
-  StockOut:  ['txn_id', 'date', 'user_id', 'item_id', 'qty', 'section_id', 'month', 'slip_no', 'status', 'created_at', 'created_by', 'void_reason', 'voided_at', 'voided_by'],
+  StockOut:  ['txn_id', 'date', 'user_id', 'item_id', 'qty', 'section_id', 'cycle_id', 'month', 'slip_no', 'status', 'created_at', 'created_by', 'void_reason', 'voided_at', 'voided_by'],
   Meta:      ['key', 'value'],
-  AuditLog:  ['ts', 'actor', 'action', 'entity', 'entity_id', 'detail_json']
+  AuditLog:  ['ts', 'actor', 'action', 'entity', 'entity_id', 'detail_json'],
+  Cycles:    ['cycle_id', 'name', 'start_date', 'end_date', 'status', 'created_at', 'created_by'],
+  Requirements: ['req_id', 'cycle_id', 'scope', 'scope_id', 'item_id', 'qty', 'note', 'created_at', 'created_by', 'updated_at']
 };
 
 /* =========================================================================
@@ -81,6 +85,9 @@ function doPost(e) {
       case 'updateUser': out = updateUser(req.payload, req); break;
       case 'addSection':    out = addSection(req.payload, req); break;
       case 'updateSection': out = updateSection(req.payload, req); break;
+      case 'addCycle':       out = addCycle(req.payload, req); break;
+      case 'updateCycle':    out = updateCycle(req.payload, req); break;
+      case 'setRequirement': out = setRequirement(req.payload, req); break;
       case 'stockIn':    out = stockIn(req.payload, req); break;
       case 'stockOut':   out = stockOut(req.payload, req); break;
       case 'voidEntry':  out = voidEntry(req.payload, req); break;
@@ -197,6 +204,44 @@ function updateSection(p, req) {
   return { ok: true, code: 'ok', data: { section: found.obj } };
 }
 
+function addCycle(p, req) {
+  var miss = required(p, ['name']); if (miss) return miss;
+  var id = 'CYC-' + pad(nextSeq('cycle_seq'), 2);
+  var obj = { cycle_id: id, name: str(p.name), start_date: str(p.start_date), end_date: str(p.end_date), status: p.status === 'closed' ? 'closed' : 'open', created_at: nowIso(), created_by: actor(req) };
+  appendObj(TABS.cycles, obj);
+  return { ok: true, code: 'ok', data: { cycle: obj } };
+}
+
+function updateCycle(p, req) {
+  var miss = required(p, ['cycle_id']); if (miss) return miss;
+  var found = findRow(TABS.cycles, 'cycle_id', p.cycle_id);
+  if (!found) return { ok: false, code: 'not_found', data: { id: p.cycle_id } };
+  ['name', 'start_date', 'end_date', 'status'].forEach(function (f) { if (p[f] !== undefined) found.obj[f] = str(p[f]); });
+  writeRow(TABS.cycles, found);
+  return { ok: true, code: 'ok', data: { cycle: found.obj } };
+}
+
+// upsert one requirement row keyed by (cycle_id, scope, scope_id, item_id)
+function setRequirement(p, req) {
+  var miss = required(p, ['cycle_id', 'scope', 'scope_id', 'item_id']); if (miss) return miss;
+  var qty = Number(p.qty || 0);
+  var sh = getSheet(TABS.requirements);
+  var values = sh.getDataRange().getValues(), headers = values[0];
+  var ci = headers.indexOf('cycle_id'), sc = headers.indexOf('scope'), si = headers.indexOf('scope_id'), it = headers.indexOf('item_id');
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][ci]) === String(p.cycle_id) && String(values[i][sc]) === String(p.scope) && String(values[i][si]) === String(p.scope_id) && String(values[i][it]) === String(p.item_id)) {
+      var found = { sheet: sh, rowIndex: i + 1, headers: headers, obj: {} };
+      for (var c = 0; c < headers.length; c++) found.obj[headers[c]] = cellToStr(values[i][c]);
+      found.obj.qty = qty; found.obj.note = str(p.note); found.obj.updated_at = nowIso();
+      writeRow(TABS.requirements, found);
+      return { ok: true, code: 'ok', data: { requirement: found.obj } };
+    }
+  }
+  var obj = { req_id: 'REQ-' + pad(nextSeq('req_seq'), 4), cycle_id: str(p.cycle_id), scope: str(p.scope), scope_id: str(p.scope_id), item_id: str(p.item_id), qty: qty, note: str(p.note), created_at: nowIso(), created_by: actor(req), updated_at: '' };
+  appendObj(TABS.requirements, obj);
+  return { ok: true, code: 'ok', data: { requirement: obj } };
+}
+
 function stockIn(p, req) {
   var miss = required(p, ['date', 'item_id', 'qty']); if (miss) return miss;
   var qty = Number(p.qty);
@@ -240,6 +285,7 @@ function stockOut(p, req) {
     item_id: str(p.item_id),
     qty: qty,
     section_id: str(user.obj.section_id),   // snapshot the user's section at issue time
+    cycle_id: str(p.cycle_id),              // procurement cycle chosen at issue time
     month: date.slice(0, 7),
     slip_no: 'SLP-' + pad(nextSeq('slip_seq'), 6),
     status: 'active',
@@ -283,6 +329,8 @@ function readAll() {
     users:    readObjects(TABS.users),
     stockIn:  readObjects(TABS.stockIn),
     stockOut: readObjects(TABS.stockOut),
+    cycles:   readObjects(TABS.cycles),
+    requirements: readObjects(TABS.requirements),
     meta:     readMeta()
   };
 }
@@ -414,13 +462,15 @@ function nowIso() { return Utilities.formatDate(new Date(), tz(), "yyyy-MM-dd'T'
 
 function audit(action, data, req) {
   try {
-    var entity = data && data.entity ? data.entity : (data && data.item ? 'item' : data && data.user ? 'user' : data && data.section ? 'section' : '');
+    var entity = data && data.entity ? data.entity : (data && data.item ? 'item' : data && data.user ? 'user' : data && data.section ? 'section' : data && data.cycle ? 'cycle' : data && data.requirement ? 'requirement' : '');
     var id = '';
     if (data) {
       if (data.txn) id = data.txn.txn_id;
       else if (data.item) id = data.item.item_id;
       else if (data.user) id = data.user.user_id;
       else if (data.section) id = data.section.section_id;
+      else if (data.cycle) id = data.cycle.cycle_id;
+      else if (data.requirement) id = data.requirement.req_id;
       else if (data.key) id = data.key;
     }
     appendObj(TABS.audit, {
@@ -440,8 +490,14 @@ function setupSheets() {
   Object.keys(HEADERS).forEach(function (name) {
     var sh = book.getSheetByName(name);
     if (!sh) sh = book.insertSheet(name);
-    var firstRow = sh.getRange(1, 1, 1, HEADERS[name].length).getValues()[0];
-    if (firstRow.join('') === '') sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]);
+    var existing = sh.getLastRow() >= 1 ? sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0] : [];
+    if (existing.join('') === '') {
+      sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]);
+    } else {
+      // re-runnable: append any header columns added in a newer schema (e.g. cycle_id)
+      var missing = HEADERS[name].filter(function (h) { return existing.indexOf(h) < 0; });
+      if (missing.length) sh.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
+    }
     sh.setFrozenRows(1);
   });
   // remove the default empty "Sheet1" if present and unused
@@ -449,7 +505,7 @@ function setupSheets() {
   if (def && book.getSheets().length > 1 && def.getLastRow() === 0) book.deleteSheet(def);
 
   var defaults = {
-    schema_version: '1', item_seq: '0', user_seq: '0', section_seq: '0', slip_seq: '0',
+    schema_version: '2', item_seq: '0', user_seq: '0', section_seq: '0', slip_seq: '0', cycle_seq: '0', req_seq: '0',
     low_stock_default: '5', office_name_bn: 'পরিকল্পনা ও উন্নয়ন বিভাগ', office_name_en: 'Planning & Development Division'
   };
   Object.keys(defaults).forEach(function (k) { if (getMeta(k) == null) setMeta(k, defaults[k]); });

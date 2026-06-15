@@ -94,9 +94,22 @@ window.DEMO_DATA = (function () {
     { date: '2026-06-10', user_id: 'USR-11', item_id: 'ITM-0008', qty: 10 },
     { date: '2026-06-12', user_id: 'USR-14', item_id: 'ITM-0016', qty: 12 }
   ];
-  const stockOut = outRaw.map((r, i) => ({ txn_id: 'OUT-' + r.date.replace(/-/g, '') + '-d' + pad(i + 1, 3), date: r.date, user_id: r.user_id, item_id: r.item_id, qty: r.qty, section_id: secOf[r.user_id] || '', month: mo(r.date), slip_no: 'SLP-' + pad(i + 1, 6), status: 'active', created_at: r.date, created_by: 'seed' }));
+  const stockOut = outRaw.map((r, i) => ({ txn_id: 'OUT-' + r.date.replace(/-/g, '') + '-d' + pad(i + 1, 3), date: r.date, user_id: r.user_id, item_id: r.item_id, qty: r.qty, section_id: secOf[r.user_id] || '', cycle_id: 'CYC-01', month: mo(r.date), slip_no: 'SLP-' + pad(i + 1, 6), status: 'active', created_at: r.date, created_by: 'seed' }));
 
-  const meta = { schema_version: '1', item_seq: items.length, user_seq: users.length, section_seq: sections.length, slip_seq: stockOut.length, low_stock_default: '5', office_name_bn: 'পরিকল্পনা ও উন্নয়ন বিভাগ', office_name_en: 'Planning & Development Division' };
+  // one open procurement cycle covering the demo period, with sample requirement lists
+  const cycles = [
+    { cycle_id: 'CYC-01', name: 'এপ্রিল–জুন ২০২৬ ক্রয়', start_date: '2026-04-01', end_date: '2026-06-30', status: 'open', created_at: '2026-06-15', created_by: 'seed' }
+  ];
+  const reqDefs = [
+    ['section', 'SEC-01', 'ITM-0008', 50], ['section', 'SEC-01', 'ITM-0003', 30], ['section', 'SEC-01', 'ITM-0029', 20],
+    ['section', 'SEC-02', 'ITM-0008', 40], ['section', 'SEC-02', 'ITM-0032', 25],
+    ['section', 'SEC-03', 'ITM-0016', 30],
+    ['user', 'USR-14', 'ITM-0016', 20],     // demonstrates "both": SEC-03 section figure (30) drives the estimate, this is USR-14's personal sub-limit
+    ['user', 'USR-21', 'ITM-0043', 15]       // SEC-04 has no section figure → its estimate rolls up from this user line
+  ];
+  const requirements = reqDefs.map((d, i) => ({ req_id: 'REQ-' + pad(i + 1, 4), cycle_id: 'CYC-01', scope: d[0], scope_id: d[1], item_id: d[2], qty: d[3], note: '', created_at: '2026-06-15', created_by: 'seed', updated_at: '' }));
 
-  return { sections, items, users, stockIn, stockOut, meta };
+  const meta = { schema_version: '2', item_seq: items.length, user_seq: users.length, section_seq: sections.length, slip_seq: stockOut.length, cycle_seq: cycles.length, req_seq: requirements.length, low_stock_default: '5', office_name_bn: 'পরিকল্পনা ও উন্নয়ন বিভাগ', office_name_en: 'Planning & Development Division' };
+
+  return { sections, items, users, stockIn, stockOut, cycles, requirements, meta };
 })();
