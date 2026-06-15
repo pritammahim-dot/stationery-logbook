@@ -7,7 +7,7 @@
  * Script /exec URL below to connect the real Google Sheet backend.
  */
 window.APP_CONFIG = {
-  API_URL: '',
+  API_URL: 'https://script.google.com/macros/s/AKfycbytbIfs-xGRPLfpTd35o6XWblYLvMAE-zpvQf5FqoZmKu_YERxg89mnhiXh4SbryRDZug/exec',
 
   OFFICE_NAME_BN: 'পরিকল্পনা ও উন্নয়ন বিভাগ',
   OFFICE_NAME_EN: 'Planning & Development Division',
