@@ -71,6 +71,7 @@ function wireChrome() {
   $('tabs').addEventListener('click', (e) => { const b = e.target.closest('.tab'); if (b) switchView(b.dataset.view); });
   $('langBtn').addEventListener('click', () => { STATE.lang = STATE.lang === 'bn' ? 'en' : 'bn'; localStorage.setItem('sl_lang', STATE.lang); applyChrome(); renderView(); });
   $('pinChip').addEventListener('click', onPinChip);
+  $('refreshBtn').addEventListener('click', async () => { const b = $('refreshBtn'); b.disabled = true; b.textContent = '…'; await load(); b.disabled = false; b.textContent = '🔄'; toast(L('হালনাগাদ হয়েছে', 'Refreshed'), 'ok'); });
   $('modalClose').addEventListener('click', closeModal);
   $('modalOverlay').addEventListener('click', (e) => { if (e.target === $('modalOverlay')) closeModal(); });
 }
@@ -148,10 +149,24 @@ async function submitPin() {
 }
 function requireWrite(fn) { if (API.hasSecret()) fn(); else openPin(fn); }
 
+/* optimistic local apply of a successful write — avoids a slow full reload after each save */
+function upsert(arr, obj, key) { const i = arr.findIndex((x) => x[key] === obj[key]); if (i >= 0) arr[i] = obj; else arr.push(obj); }
+function applyWrite(res) {
+  const d = res && res.data; if (!d) return;
+  if (Array.isArray(d.created)) d.created.forEach((t) => STATE.stockIn.push(t));
+  if (d.txn) upsert(d.entity === 'stockOut' ? STATE.stockOut : STATE.stockIn, d.txn, 'txn_id');
+  if (d.item) upsert(STATE.items, d.item, 'item_id');
+  if (d.user) upsert(STATE.users, d.user, 'user_id');
+  if (d.section) upsert(STATE.sections, d.section, 'section_id');
+  if (d.cycle) upsert(STATE.cycles, d.cycle, 'cycle_id');
+  if (d.requirement) upsert(STATE.requirements, d.requirement, 'req_id');
+  if (d.key !== undefined && d.value !== undefined) STATE.meta[d.key] = d.value;
+}
+
 /* central write handler: returns the result object (or null on handled failure) */
 async function doWrite(promise, okMsg) {
   const res = await promise;
-  if (res && res.ok) { await load(); if (okMsg) toast(okMsg, 'ok'); return res; }
+  if (res && res.ok) { applyWrite(res); recompute(); renderView(); if (okMsg) toast(okMsg, 'ok'); return res; }
   const code = res ? res.code : 'error', d = (res && res.data) || {};
   if (code === 'bad_secret') { API.setSecret(''); setLockUI(false); toast(L('ভুল পিন — আবার আনলক করুন', 'Wrong PIN — unlock again'), 'err'); }
   else if (code === 'insufficient_stock') toast(L(`স্টকে যথেষ্ট নেই (ব্যালেন্স ${nf(d.balance)})`, `Insufficient stock (balance ${d.balance})`), 'err');

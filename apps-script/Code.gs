@@ -265,19 +265,24 @@ function stockIn(p, req) {
   return { ok: true, code: 'ok', data: { txn: obj, entity: 'stockIn' } };
 }
 
-// append many stock-in rows in one locked call (used by file import)
+// append many stock-in rows in ONE batched write (used by file import) — fast even for 50+ rows
 function bulkStockIn(p, req) {
   if (!p || !Array.isArray(p.rows) || !p.rows.length) return { ok: false, code: 'validation', data: { field: 'rows', msg: 'no rows' } };
-  var date0 = str(p.date), created = [];
+  var date0 = str(p.date), now = nowIso(), by = actor(req);
+  var valid = {}; readObjects(TABS.items).forEach(function (it) { valid[String(it.item_id)] = true; });   // read items once
+  var sh = getSheet(TABS.stockIn);
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var created = [], matrix = [];
   for (var i = 0; i < p.rows.length; i++) {
     var row = p.rows[i] || {}, qty = Number(row.qty);
-    if (!(qty > 0) || !row.item_id) continue;
-    if (!findRow(TABS.items, 'item_id', row.item_id)) continue;
+    if (!(qty > 0) || !row.item_id || !valid[String(row.item_id)]) continue;
     var date = str(row.date || date0);
-    var obj = { txn_id: 'IN-' + ymd(date) + '-' + hex4(), date: date, item_id: str(row.item_id), qty: qty, remarks: str(row.remarks), month: date.slice(0, 7), status: 'active', created_at: nowIso(), created_by: actor(req), void_reason: '', voided_at: '', voided_by: '' };
-    appendObj(TABS.stockIn, obj); created.push(obj);
+    var obj = { txn_id: 'IN-' + ymd(date) + '-' + hex4(), date: date, item_id: str(row.item_id), qty: qty, remarks: str(row.remarks), month: date.slice(0, 7), status: 'active', created_at: now, created_by: by, void_reason: '', voided_at: '', voided_by: '' };
+    created.push(obj);
+    matrix.push(headers.map(function (h) { return obj[h] !== undefined ? obj[h] : ''; }));
   }
   if (!created.length) return { ok: false, code: 'validation', data: { msg: 'no valid rows' } };
+  sh.getRange(sh.getLastRow() + 1, 1, matrix.length, headers.length).setValues(matrix);   // one write for all rows
   return { ok: true, code: 'ok', data: { created: created, count: created.length, entity: 'stockIn' } };
 }
 
